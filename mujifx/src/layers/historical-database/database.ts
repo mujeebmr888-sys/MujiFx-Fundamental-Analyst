@@ -6,6 +6,7 @@
  */
 
 import { supabase } from "@/config/supabase";
+import { supabaseAdmin } from "@/config/supabase-admin";
 import type { EconomicDataRow } from "@/layers/data-normalization/normalize";
 import type { IndicatorId } from "@/types/economic-data";
 
@@ -13,9 +14,14 @@ import type { IndicatorId } from "@/types/economic-data";
  * Saves a normalized data point. Uses upsert on (indicator, period_covered)
  * so re-running the pipeline for the same period updates the row instead of
  * creating a duplicate — important because forecasts get revised.
+ *
+ * Uses the ADMIN client (service_role key) because writes are intentionally
+ * blocked for the public/anon key by Row Level Security — see docs/schema.sql.
+ * This function must only ever be called from server-side code (API routes),
+ * never from a client component.
  */
 export async function saveDataPoint(row: EconomicDataRow) {
-  const { data, error } = await supabase
+  const { data, error } = await supabaseAdmin
     .from("economic_data_points")
     .upsert(row, { onConflict: "indicator,period_covered" })
     .select();
