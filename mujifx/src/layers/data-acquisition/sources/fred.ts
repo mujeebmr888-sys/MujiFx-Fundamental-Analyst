@@ -16,8 +16,13 @@ const FRED_SERIES_MAP: Partial<Record<IndicatorId, string>> = {
   CORE_CPI: "CPILFESL",
   PCE: "PCE",
   CORE_PCE: "PCEPILFE",
+  PPI: "PPIACO",
   NFP: "PAYEMS",
   UNEMPLOYMENT_RATE: "UNRATE",
+  AVG_HOURLY_EARNINGS: "CES0500000003",
+  INITIAL_JOBLESS_CLAIMS: "ICSA",
+  CONTINUING_CLAIMS: "CCSA",
+  JOLTS: "JTSJOL",
   GDP: "GDP",
   RETAIL_SALES: "RSAFS",
   INDUSTRIAL_PRODUCTION: "INDPRO",
@@ -26,6 +31,12 @@ const FRED_SERIES_MAP: Partial<Record<IndicatorId, string>> = {
   TREASURY_10Y: "DGS10",
   BROAD_DOLLAR_INDEX: "DTWEXBGS",
 };
+
+// Exported so the sync-all route can loop over every mapped indicator
+// without hardcoding the list a second time.
+export const ALL_FRED_INDICATORS = Object.keys(
+  FRED_SERIES_MAP
+) as IndicatorId[];
 
 export async function fetchLatestFromFred(
   indicator: IndicatorId
