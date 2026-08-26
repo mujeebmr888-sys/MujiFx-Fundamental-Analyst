@@ -37,11 +37,18 @@ export async function GET() {
       saved,
     });
   } catch (err) {
+    // Log the full error server-side only (visible in Vercel's function logs,
+    // never in the response the browser receives) — the response itself
+    // must never echo raw error text, since it could contain sensitive
+    // details like a malformed API key.
+    console.error("CPI sync failed:", err);
+
     return NextResponse.json(
       {
         success: false,
         stage: "database",
-        reason: err instanceof Error ? err.message : String(err),
+        reason:
+          "Could not save data. Check the Vercel function logs for details.",
       },
       { status: 500 }
     );
