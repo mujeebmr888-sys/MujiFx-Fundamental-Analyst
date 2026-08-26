@@ -2,6 +2,8 @@ import SideNav from "@/components/dashboard/SideNav";
 import { getLatestDataPoint } from "@/layers/historical-database/database";
 
 export const dynamic = "force-dynamic"; // always read fresh data, never cache
+export const fetchCache = "force-no-store"; // never reuse a cached network response
+export const revalidate = 0;
 
 export default async function DashboardPage() {
   let cpi = null;
