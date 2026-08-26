@@ -31,14 +31,17 @@ to it — this keeps the system honest and debuggable.
 See `docs/ARCHITECTURE.md` for details on each layer and `docs/DATA_SOURCES.md`
 for exactly which free APIs feed which economic indicator.
 
-## Status: Foundation only (Milestone 1)
+## Status: Milestone 2 done — first real end-to-end pipeline
 
-This first milestone contains:
 - Full folder/module structure for all 8 layers
-- TypeScript types (data contracts) that every layer will use
-- One working example: fetching real CPI data from FRED (free, no key needed
-  for basic use... actually FRED requires a free API key — see setup docs)
-- Empty dashboard shell with the navigation you specified
+- TypeScript types (data contracts) that every layer uses
+- Layer 1: real FRED API client
+- Layer 2: normalization (FRED shape → database row shape)
+- Layer 3: Supabase (Postgres) historical database, with schema in `docs/schema.sql`
+- One working end-to-end route: `/api/sync/cpi` pulls real CPI data from FRED
+  and saves it to Supabase
+- Dashboard homepage reads the latest CPI value from the real database (shows
+  "no data yet" honestly if the pipeline hasn't been run — never a fake number)
 
 Nothing is hardcoded or faked. Layers that aren't built yet simply don't exist yet
 rather than containing placeholder numbers.
@@ -47,11 +50,21 @@ rather than containing placeholder numbers.
 
 - Next.js 14 (App Router) + TypeScript — frontend + API routes
 - Tailwind CSS — styling (institutional/research look, not flashy)
-- Firebase Firestore — historical data storage
-- Firebase Hosting + Cloud Functions — deployment + scheduled data pulls
+- Supabase (Postgres) — historical data storage
 - FRED API (St. Louis Fed) — primary free data source for CPI, PCE, NFP, GDP, Fed
   funds rate, unemployment, and more
-- Treasury.gov — yield curve data
+- Treasury.gov — yield curve data (not wired up yet)
+
+## Setup after downloading/updating this project
+
+1. Run `docs/schema.sql` in Supabase → SQL Editor to create the table.
+2. Copy `.env.example` to `.env.local` and fill in:
+   - `FRED_API_KEY`
+   - `NEXT_PUBLIC_SUPABASE_URL`
+   - `NEXT_PUBLIC_SUPABASE_ANON_KEY`
+3. Run `npm install` then `npm run dev`.
+4. Visit `http://localhost:3000/api/sync/cpi` once to pull real CPI data in.
+5. Visit `http://localhost:3000` to see it on the dashboard.
 
 ## Next steps (see bottom of chat message)
 
