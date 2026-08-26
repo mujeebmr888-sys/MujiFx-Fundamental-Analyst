@@ -4,7 +4,16 @@ import { getLatestDataPoint } from "@/layers/historical-database/database";
 export const dynamic = "force-dynamic"; // always read fresh data, never cache
 
 export default async function DashboardPage() {
-  const cpi = await getLatestDataPoint("CPI").catch(() => null);
+  let cpi = null;
+  let debugError: string | null = null;
+
+  try {
+    cpi = await getLatestDataPoint("CPI");
+  } catch (err) {
+    // Safe to show: this only touches the public anon-key client, which
+    // never has access to secrets. Helps diagnose connection issues.
+    debugError = err instanceof Error ? err.message : String(err);
+  }
 
   return (
     <div className="flex">
@@ -31,6 +40,12 @@ export default async function DashboardPage() {
             </div>
           )}
         </div>
+
+        {debugError && (
+          <div className="mt-4 max-w-lg border border-red-900 rounded-lg p-4 bg-red-950/30 text-red-300 text-xs font-mono">
+            Debug info: {debugError}
+          </div>
+        )}
       </main>
     </div>
   );
