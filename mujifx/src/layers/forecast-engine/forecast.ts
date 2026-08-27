@@ -1,0 +1,118 @@
+/**
+ * LAYER 5: FORECAST ENGINE
+ *
+ * Produces MUJIFX's OWN estimate for an indicator's next release — never a
+ * copy of someone else's consensus number (we don't have free access to
+ * that, and scraping it would violate other sites' terms of service).
+ *
+ * Method (intentionally simple and transparent, v1): look at the trend of
+ * the last few releases and project it forward, using how much that trend
+ * has varied historically to size the range and confidence. This is a
+ * baseline model, not a sophisticated one — the rationale text says so
+ * explicitly, and confidence is capped at "Medium" so it never overstates
+ * itself. This can be replaced with a smarter model later without changing
+ * anything outside this file.
+ */
+
+import type { IndicatorId } from "@/types/economic-data";
+
+export interface ForecastResult {
+  indicator: IndicatorId;
+  forecastForPeriod: string; // e.g. "2026-08-01"
+  estimate: number | null;
+  rangeLow: number | null;
+  rangeHigh: number | null;
+  confidence: "Insufficient data" | "Low" | "Medium";
+  rationale: string;
+  risks: string;
+}
+
+interface HistoricalRow {
+  period_covered: string;
+  actual: number | null;
+}
+
+/**
+ * @param history Past releases for one indicator, ordered NEWEST FIRST
+ *                (this is how getIndicatorHistory returns them).
+ */
+export function generateForecast(
+  indicator: IndicatorId,
+  history: HistoricalRow[]
+): ForecastResult {
+  const actuals = history
+    .filter((h) => h.actual !== null)
+    .map((h) => h.actual as number);
+
+  const nextPeriod = computeNextPeriod(history[0]?.period_covered);
+
+  const disclaimer =
+    "This is MUJIFX's own model estimate based on recent trend, not a guaranteed prediction or a market consensus figure. Actual data can and does differ.";
+
+  if (actuals.length < 3) {
+    return {
+      indicator,
+      forecastForPeriod: nextPeriod,
+      estimate: null,
+      rangeLow: null,
+      rangeHigh: null,
+      confidence: "Insufficient data",
+      rationale:
+        "Not enough historical releases stored yet to model a trend (need at least 3). This will fill in automatically as more monthly releases are synced.",
+      risks: disclaimer,
+    };
+  }
+
+  // Newest-first → take up to the last 6 month-over-month changes.
+  const recentActuals = actuals.slice(0, 7); // need N+1 points for N diffs
+  const diffs: number[] = [];
+  for (let i = 0; i < recentActuals.length - 1; i++) {
+    diffs.push(recentActuals[i] - recentActuals[i + 1]);
+  }
+
+  const avgDiff = average(diffs);
+  const latestActual = recentActuals[0];
+  const estimate = round(latestActual + avgDiff);
+
+  const stdDev = standardDeviation(diffs);
+  // Range width floors at 0.5% of the latest value so it's never a
+  // suspiciously precise single point even when history is very stable.
+  const rangeWidth = Math.max(stdDev, Math.abs(latestActual) * 0.005);
+
+  const confidence: ForecastResult["confidence"] =
+    diffs.length >= 6 ? "Medium" : "Low";
+
+  return {
+    indicator,
+    forecastForPeriod: nextPeriod,
+    estimate,
+    rangeLow: round(estimate - rangeWidth),
+    rangeHigh: round(estimate + rangeWidth),
+    confidence,
+    rationale: `Based on the average month-over-month change across the last ${diffs.length} release(s) (avg change: ${round(
+      avgDiff
+    )}), projected forward from the latest actual value of ${latestActual}.`,
+    risks: disclaimer,
+  };
+}
+
+function computeNextPeriod(latestPeriod?: string): string {
+  if (!latestPeriod) return "unknown";
+  const d = new Date(latestPeriod);
+  d.setUTCMonth(d.getUTCMonth() + 1);
+  return d.toISOString().slice(0, 10);
+}
+
+function average(nums: number[]): number {
+  return nums.reduce((a, b) => a + b, 0) / nums.length;
+}
+
+function standardDeviation(nums: number[]): number {
+  const avg = average(nums);
+  const variance = average(nums.map((n) => (n - avg) ** 2));
+  return Math.sqrt(variance);
+}
+
+function round(n: number): number {
+  return Math.round(n * 1000) / 1000;
+}

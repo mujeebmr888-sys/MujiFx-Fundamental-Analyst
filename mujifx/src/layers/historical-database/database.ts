@@ -9,6 +9,7 @@ import { supabase } from "@/config/supabase";
 import { supabaseAdmin } from "@/config/supabase-admin";
 import type { EconomicDataRow } from "@/layers/data-normalization/normalize";
 import type { IndicatorId } from "@/types/economic-data";
+import type { ForecastResult } from "@/layers/forecast-engine/forecast";
 
 /**
  * Saves a normalized data point. Uses upsert on (indicator, period_covered)
@@ -97,6 +98,52 @@ export async function getLatestDataPoint(indicator: IndicatorId) {
 
   if (error) {
     throw new Error(`Failed to fetch latest for ${indicator}: ${error.message}`);
+  }
+  return data;
+}
+
+/**
+ * Saves a MUJIFX forecast as an upcoming row (actual stays null — it hasn't
+ * been released yet). If a row for that future period already exists (e.g.
+ * from a previous forecast run), this updates just the forecast fields
+ * without disturbing anything else.
+ */
+export async function saveForecast(forecast: ForecastResult) {
+  if (forecast.estimate === null) {
+    // Insufficient data — nothing to save yet, and that's an honest,
+    // expected state, not an error.
+    return null;
+  }
+
+  const { data, error } = await supabaseAdmin
+    .from("economic_data_points")
+    .upsert(
+      {
+        indicator: forecast.indicator,
+        period_covered: forecast.forecastForPeriod,
+        release_date: forecast.forecastForPeriod,
+        actual: null,
+        available: false,
+        unavailable_reason:
+          "Not yet released. Showing MUJIFX's model estimate below — not confirmed government data.",
+        unit: "",
+        source_name: "MUJIFX Forecast Engine (internal model)",
+        source_url: "",
+        source_tier: "TIER_3_RESEARCH",
+        retrieved_at: new Date().toISOString(),
+        mujifx_estimate: forecast.estimate,
+        mujifx_estimate_low: forecast.rangeLow,
+        mujifx_estimate_high: forecast.rangeHigh,
+        mujifx_confidence: forecast.confidence,
+        mujifx_rationale: forecast.rationale,
+        mujifx_risks: forecast.risks,
+      },
+      { onConflict: "indicator,period_covered" }
+    )
+    .select();
+
+  if (error) {
+    throw new Error(`Failed to save forecast for ${forecast.indicator}: ${error.message}`);
   }
   return data;
 }

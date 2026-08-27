@@ -66,14 +66,23 @@ rather than containing placeholder numbers.
 4. Visit `http://localhost:3000/api/sync/cpi` once to pull real CPI data in.
 5. Visit `http://localhost:3000` to see it on the dashboard.
 
-## Status: Milestone 5 — economic calculations wired into the dashboard
+## Status: Milestone 7 — real Forecast Engine (Layer 5)
 
-- Layer 4 (economic-calculations) now computes month-over-month change and
-  trend direction from real stored data (no fabricated forecasts — FRED
-  doesn't provide consensus estimates, so "surprise" stays honestly null
-  until we add a real forecast source later)
-- Dashboard cards show a trend arrow (▲/▼/→) and the change vs the previous
-  release for every indicator that has enough history
+- Removed the manual forecast-entry admin panel — replaced with a real
+  Forecast Engine that generates MUJIFX's own estimate from stored trend
+  data, per the original spec's "Market expectations" / "Forecast engine"
+  requirements
+- For CPI, PPI, NFP, and GDP, the engine projects the next release using
+  the average recent month-over-month change, with a range and a capped
+  "Low"/"Medium" confidence — it never claims certainty, and says
+  "Insufficient data" honestly until at least 3 real releases are stored
+- New `/usd/forecasts` page shows these estimates with their rationale and
+  a disclaimer
+- Forecast generation now runs automatically as part of the same daily
+  cron job that syncs data (`/api/sync/all`) — no extra Vercel cron job
+  needed
+- Run `docs/migration_forecast_engine.sql` in Supabase once to add the new
+  columns this needs
 
 ## Next steps (see bottom of chat message)
 

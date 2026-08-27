@@ -1,6 +1,8 @@
 /**
- * Syncs EVERY indicator we have a FRED mapping for. This is the route the
- * daily cron job hits (see vercel.json). It's also safe to call manually.
+ * Syncs EVERY indicator we have a FRED mapping for, THEN generates MUJIFX's
+ * own forecasts for the major releases. Combined into one route so a single
+ * daily cron job (Vercel's Hobby plan is limited on cron jobs) covers both
+ * steps. See vercel.json for the schedule.
  *
  * Protected: only Vercel's own cron scheduler (or someone who knows the
  * CRON_SECRET) can trigger this — otherwise anyone on the internet could
@@ -13,10 +15,18 @@ import {
   ALL_FRED_INDICATORS,
 } from "@/layers/data-acquisition/sources/fred";
 import { normalizeToRow } from "@/layers/data-normalization/normalize";
-import { saveDataPoint } from "@/layers/historical-database/database";
+import {
+  saveDataPoint,
+  getIndicatorHistory,
+  saveForecast,
+} from "@/layers/historical-database/database";
+import { generateForecast } from "@/layers/forecast-engine/forecast";
+import type { IndicatorId } from "@/types/economic-data";
 
 export const dynamic = "force-dynamic";
 export const maxDuration = 60; // this route calls FRED ~17 times; give it room
+
+const MAJOR_RELEASES_TO_FORECAST: IndicatorId[] = ["CPI", "PPI", "NFP", "GDP"];
 
 export async function GET(request: NextRequest) {
   // Vercel automatically sends this header on cron-triggered requests.
@@ -62,13 +72,29 @@ export async function GET(request: NextRequest) {
     }
   }
 
+  const forecastResults: Array<{ indicator: string; success: boolean }> = [];
+  for (const indicator of MAJOR_RELEASES_TO_FORECAST) {
+    try {
+      const history = await getIndicatorHistory(indicator, 12);
+      const forecast = generateForecast(indicator, history ?? []);
+      await saveForecast(forecast);
+      forecastResults.push({ indicator, success: true });
+    } catch (err) {
+      console.error(`Forecast generation failed for ${indicator}:`, err);
+      forecastResults.push({ indicator, success: false });
+    }
+  }
+
   const successCount = results.filter((r) => r.success).length;
 
   return NextResponse.json({
     ranAt: new Date().toISOString(),
-    total: results.length,
-    succeeded: successCount,
-    failed: results.length - successCount,
-    results,
+    sync: {
+      total: results.length,
+      succeeded: successCount,
+      failed: results.length - successCount,
+      results,
+    },
+    forecasts: forecastResults,
   });
 }
