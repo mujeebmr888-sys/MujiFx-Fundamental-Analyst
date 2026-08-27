@@ -1,19 +1,27 @@
 import SideNav from "@/components/dashboard/SideNav";
-import { getLatestDataPoint } from "@/layers/historical-database/database";
+import IndicatorCard from "@/components/dashboard/IndicatorCard";
+import { getLatestForIndicators } from "@/layers/historical-database/database";
+import {
+  INDICATOR_META,
+  CATEGORY_ORDER,
+} from "@/config/indicators";
+import type { IndicatorId } from "@/types/economic-data";
 
-export const dynamic = "force-dynamic"; // always read fresh data, never cache
-export const fetchCache = "force-no-store"; // never reuse a cached network response
+export const dynamic = "force-dynamic";
+export const fetchCache = "force-no-store";
 export const revalidate = 0;
 
 export default async function DashboardPage() {
-  let cpi = null;
+  const allIndicators = Object.keys(INDICATOR_META) as IndicatorId[];
+
+  let latestByIndicator: Awaited<
+    ReturnType<typeof getLatestForIndicators>
+  > | null = null;
   let debugError: string | null = null;
 
   try {
-    cpi = await getLatestDataPoint("CPI");
+    latestByIndicator = await getLatestForIndicators(allIndicators);
   } catch (err) {
-    // Safe to show: this only touches the public anon-key client, which
-    // never has access to secrets. Helps diagnose connection issues.
     debugError = err instanceof Error ? err.message : String(err);
   }
 
@@ -23,31 +31,39 @@ export default async function DashboardPage() {
       <main className="flex-1 p-8">
         <h1 className="text-2xl font-semibold mb-2">USD Fundamental Research</h1>
         <p className="text-slate-400 max-w-2xl mb-8">
-          Institutional-style macro research. This is analysis, not trade signals.
+          Institutional-style macro research, updated automatically once a day
+          from official U.S. government sources. This is analysis, not trade
+          signals.
         </p>
 
-        <div className="border border-slate-800 rounded-lg p-6 bg-slate-900/50 max-w-sm">
-          <div className="text-sm text-slate-400 mb-1">CPI (latest)</div>
-          {cpi ? (
-            <>
-              <div className="text-3xl font-semibold">{cpi.actual}</div>
-              <div className="text-xs text-slate-500 mt-2">
-                Period: {cpi.period_covered} · Source: {cpi.source_name}
-              </div>
-            </>
-          ) : (
-            <div className="text-slate-500 text-sm">
-              No data yet — visit <code>/api/sync/cpi</code> once to run the
-              first pipeline sync, or the database isn't connected yet.
-            </div>
-          )}
-        </div>
-
         {debugError && (
-          <div className="mt-4 max-w-lg border border-red-900 rounded-lg p-4 bg-red-950/30 text-red-300 text-xs font-mono">
+          <div className="mb-6 max-w-lg border border-red-900 rounded-lg p-4 bg-red-950/30 text-red-300 text-xs font-mono">
             Debug info: {debugError}
           </div>
         )}
+
+        {CATEGORY_ORDER.map((category) => {
+          const indicatorsInCategory = allIndicators.filter(
+            (id) => INDICATOR_META[id].category === category
+          );
+
+          return (
+            <section key={category} className="mb-10">
+              <h2 className="text-sm font-semibold text-slate-400 uppercase tracking-wide mb-3">
+                {category}
+              </h2>
+              <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-4">
+                {indicatorsInCategory.map((id) => (
+                  <IndicatorCard
+                    key={id}
+                    meta={INDICATOR_META[id]}
+                    row={latestByIndicator?.get(id)}
+                  />
+                ))}
+              </div>
+            </section>
+          );
+        })}
       </main>
     </div>
   );

@@ -1,0 +1,64 @@
+import type { IndicatorId } from "@/types/economic-data";
+
+export interface IndicatorMeta {
+  label: string;
+  category: "Inflation" | "Employment" | "Growth" | "Federal Reserve" | "Market";
+  unitSuffix?: string; // shown after the number, e.g. "%"
+}
+
+export const INDICATOR_META: Record<IndicatorId, IndicatorMeta> = {
+  CPI: { label: "CPI (Index)", category: "Inflation" },
+  CORE_CPI: { label: "Core CPI (Index)", category: "Inflation" },
+  PCE: { label: "PCE (Index)", category: "Inflation" },
+  CORE_PCE: { label: "Core PCE (Index)", category: "Inflation" },
+  PPI: { label: "PPI (Index)", category: "Inflation" },
+
+  NFP: { label: "Nonfarm Payrolls", category: "Employment", unitSuffix: "K" },
+  UNEMPLOYMENT_RATE: {
+    label: "Unemployment Rate",
+    category: "Employment",
+    unitSuffix: "%",
+  },
+  AVG_HOURLY_EARNINGS: {
+    label: "Avg Hourly Earnings",
+    category: "Employment",
+    unitSuffix: "$",
+  },
+  INITIAL_JOBLESS_CLAIMS: {
+    label: "Initial Jobless Claims",
+    category: "Employment",
+  },
+  CONTINUING_CLAIMS: { label: "Continuing Claims", category: "Employment" },
+  JOLTS: { label: "JOLTS Job Openings", category: "Employment" },
+
+  GDP: { label: "GDP", category: "Growth", unitSuffix: "B$" },
+  RETAIL_SALES: { label: "Retail Sales", category: "Growth", unitSuffix: "M$" },
+  INDUSTRIAL_PRODUCTION: {
+    label: "Industrial Production (Index)",
+    category: "Growth",
+  },
+  ISM_MANUFACTURING: { label: "ISM Manufacturing", category: "Growth" },
+  ISM_SERVICES: { label: "ISM Services", category: "Growth" },
+
+  FED_FUNDS_RATE: {
+    label: "Federal Funds Rate",
+    category: "Federal Reserve",
+    unitSuffix: "%",
+  },
+
+  TREASURY_2Y: { label: "2-Year Treasury Yield", category: "Market", unitSuffix: "%" },
+  TREASURY_10Y: {
+    label: "10-Year Treasury Yield",
+    category: "Market",
+    unitSuffix: "%",
+  },
+  BROAD_DOLLAR_INDEX: { label: "Fed Broad Dollar Index", category: "Market" },
+};
+
+export const CATEGORY_ORDER: IndicatorMeta["category"][] = [
+  "Inflation",
+  "Employment",
+  "Growth",
+  "Federal Reserve",
+  "Market",
+];

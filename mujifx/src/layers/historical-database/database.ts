@@ -54,6 +54,34 @@ export async function getIndicatorHistory(
 }
 
 /**
+ * Gets the latest data point for MANY indicators in a single database query
+ * (instead of one query per indicator). Returns a map keyed by indicator —
+ * indicators with no data yet simply won't have a key, so callers should
+ * check for undefined rather than assuming every indicator is present.
+ */
+export async function getLatestForIndicators(indicators: IndicatorId[]) {
+  const { data, error } = await supabase
+    .from("economic_data_points")
+    .select("*")
+    .in("indicator", indicators)
+    .order("release_date", { ascending: false });
+
+  if (error) {
+    throw new Error(`Failed to fetch latest indicators: ${error.message}`);
+  }
+
+  const latestByIndicator = new Map<string, (typeof data)[number]>();
+  for (const row of data ?? []) {
+    // Rows are ordered newest-first, so the first time we see an indicator
+    // is its latest release — skip any further (older) rows for it.
+    if (!latestByIndicator.has(row.indicator)) {
+      latestByIndicator.set(row.indicator, row);
+    }
+  }
+  return latestByIndicator;
+}
+
+/**
  * Gets the single latest data point for an indicator, or null if none exists
  * yet. Never returns fabricated data — an empty database means null, not a
  * fake number.
