@@ -66,23 +66,16 @@ rather than containing placeholder numbers.
 4. Visit `http://localhost:3000/api/sync/cpi` once to pull real CPI data in.
 5. Visit `http://localhost:3000` to see it on the dashboard.
 
-## Status: Milestone 7 — real Forecast Engine (Layer 5)
+## Status: Milestone 8 — Fundamental Scoring (Layer 6)
 
-- Removed the manual forecast-entry admin panel — replaced with a real
-  Forecast Engine that generates MUJIFX's own estimate from stored trend
-  data, per the original spec's "Market expectations" / "Forecast engine"
-  requirements
-- For CPI, PPI, NFP, and GDP, the engine projects the next release using
-  the average recent month-over-month change, with a range and a capped
-  "Low"/"Medium" confidence — it never claims certainty, and says
-  "Insufficient data" honestly until at least 3 real releases are stored
-- New `/usd/forecasts` page shows these estimates with their rationale and
-  a disclaimer
-- Forecast generation now runs automatically as part of the same daily
-  cron job that syncs data (`/api/sync/all`) — no extra Vercel cron job
-  needed
-- Run `docs/migration_forecast_engine.sql` in Supabase once to add the new
-  columns this needs
+- New `USD Fundamental Bias` card at the top of the dashboard, combining
+  Fed Funds Rate, CPI, NFP, Unemployment Rate, and 10-Year Treasury Yield
+  trends into one transparent, weighted score (-10 to +10)
+- Every component of the score shows its own plain-language rationale —
+  nothing is a hidden black box
+- Explicitly labeled "not a trade signal" per the core product principle;
+  the score reflects a widely-known macro heuristic, not a proprietary or
+  guaranteed prediction
 
 ## Next steps (see bottom of chat message)
 

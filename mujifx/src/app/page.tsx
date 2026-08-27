@@ -1,6 +1,8 @@
 import SideNav from "@/components/dashboard/SideNav";
 import IndicatorCard from "@/components/dashboard/IndicatorCard";
+import FundamentalBiasCard from "@/components/dashboard/FundamentalBiasCard";
 import { getLatestForIndicators } from "@/layers/historical-database/database";
+import { computeUsdFundamentalScore } from "@/layers/fundamental-scoring/scoring";
 import {
   INDICATOR_META,
   CATEGORY_ORDER,
@@ -25,6 +27,19 @@ export default async function DashboardPage() {
     debugError = err instanceof Error ? err.message : String(err);
   }
 
+  // Build a simple indicator -> month-over-month change map for scoring.
+  const momChangeByIndicator = new Map<IndicatorId, number | null>();
+  if (latestByIndicator) {
+    for (const [id, row] of latestByIndicator.entries()) {
+      const momChange =
+        row.actual != null && row.previous != null
+          ? Math.round((row.actual - row.previous) * 1000) / 1000
+          : null;
+      momChangeByIndicator.set(id as IndicatorId, momChange);
+    }
+  }
+  const fundamentalScore = computeUsdFundamentalScore(momChangeByIndicator);
+
   return (
     <div className="flex">
       <SideNav />
@@ -41,6 +56,8 @@ export default async function DashboardPage() {
             Debug info: {debugError}
           </div>
         )}
+
+        {latestByIndicator && <FundamentalBiasCard score={fundamentalScore} />}
 
         {CATEGORY_ORDER.map((category) => {
           const indicatorsInCategory = allIndicators.filter(
