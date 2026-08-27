@@ -66,5 +66,14 @@ rather than containing placeholder numbers.
 4. Visit `http://localhost:3000/api/sync/cpi` once to pull real CPI data in.
 5. Visit `http://localhost:3000` to see it on the dashboard.
 
+## Status: Milestone 5 — economic calculations wired into the dashboard
+
+- Layer 4 (economic-calculations) now computes month-over-month change and
+  trend direction from real stored data (no fabricated forecasts — FRED
+  doesn't provide consensus estimates, so "surprise" stays honestly null
+  until we add a real forecast source later)
+- Dashboard cards show a trend arrow (▲/▼/→) and the change vs the previous
+  release for every indicator that has enough history
+
 ## Next steps (see bottom of chat message)
 
