@@ -97,18 +97,32 @@ consecutive releases have moved the same direction) are weighed together:
 
 **Why NOT an absolute NFP threshold (e.g. "150K is strong"):** the "breakeven" payroll number needed to hold unemployment steady has shifted over time (population growth, immigration trends) and is itself debated among economists. Using a fixed number would be exactly the kind of arbitrary threshold you asked us to avoid. Using **relative trend** (3-month avg vs 12-month avg) avoids that problem.
 
-**Interpretation → Assessment rule:** all five evidence inputs (NFP trend,
-unemployment trend, Sahm spread, claims trend, JOLTS trend) are weighed
-together — no single one, including Sahm, mechanically decides the label:
-- **Strong**: majority of the inputs point to improving/tight labor
-  conditions (NFP's recent pace running above its longer-term pace,
-  unemployment stable/falling, claims
-  low/falling, JOLTS stable/rising), AND the Sahm spread shows no
-  recession-level stress
-- **Weak**: majority of inputs point to deteriorating conditions, AND/OR
-  the Sahm spread crosses its recession-signal level (reported as a
-  strong contributing flag, not an automatic override)
-- **Moderate**: inputs are mixed
+**Interpretation → Assessment rule:** the assessment is decided by matching
+**named, fixed evidence patterns** across NFP, Unemployment, Claims,
+Continuing Claims, JOLTS, Wages, and the Sahm Rule — never by counting how
+many inputs agree, and never by a weighted score. No single indicator
+(including Sahm) acts as a standalone override; every pattern below is a
+conjunction/combination of multiple named conditions:
+
+- **Strong** — ALL of the following hold together: NFP's recent pace is
+  stronger than its longer-term pace, Unemployment is stable/falling on a
+  medium-term basis, Initial Claims are stable/falling, Continuing Claims
+  are stable/falling, JOLTS is stable/rising, Wages are above the
+  provisional benchmark, there is no recession-level Sahm stress, and no
+  major contradictory evidence was already flagged (e.g. short-term vs
+  medium-term Unemployment disagreement).
+- **Weak** — matches either of two named patterns:
+  - *Broad deterioration*: NFP, Unemployment, and JOLTS all read weak,
+    together with deterioration in Initial and/or Continuing Claims; or
+  - *Stress combination*: the Sahm Rule has crossed its recession-signal
+    threshold **together with** NFP or Unemployment also reading weak —
+    Sahm alone never matches this pattern; it must be paired with at
+    least one other deteriorating indicator.
+- **Moderate** — everything else: evidence is resilient but mixed, some
+  labor indicators weaken while others hold up, important data is
+  missing, short-term and medium-term trends disagree, or Sahm stress is
+  present without a broader deteriorating pattern to pair with. The
+  specific reason is always stated, not just the label.
 
 **Confidence:** same High/Medium/Insufficient pattern as Inflation, based on how many months of history exist and whether sub-indicators agree.
 
