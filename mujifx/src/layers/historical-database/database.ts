@@ -10,6 +10,7 @@ import { supabaseAdmin } from "@/config/supabase-admin";
 import type { EconomicDataRow } from "@/layers/data-normalization/normalize";
 import type { IndicatorId } from "@/types/economic-data";
 import type { ForecastResult } from "@/layers/forecast-engine/forecast";
+import type { AnalystAssessment } from "@/types/economic-data";
 
 /**
  * Saves a normalized data point. Uses upsert on (indicator, period_covered)
@@ -65,6 +66,7 @@ export async function getLatestForIndicators(indicators: IndicatorId[]) {
     .from("economic_data_points")
     .select("*")
     .in("indicator", indicators)
+    .not("actual", "is", null) // exclude future forecast placeholder rows
     .order("release_date", { ascending: false });
 
   if (error) {
@@ -83,6 +85,33 @@ export async function getLatestForIndicators(indicators: IndicatorId[]) {
 }
 
 /**
+ * Gets the latest MUJIFX forecast row for each indicator (the "future"
+ * placeholder rows saveForecast() creates — actual is null, mujifx_estimate
+ * is not). Separate from getLatestForIndicators, which is for real releases.
+ */
+export async function getLatestForecasts(indicators: IndicatorId[]) {
+  const { data, error } = await supabase
+    .from("economic_data_points")
+    .select("*")
+    .in("indicator", indicators)
+    .is("actual", null)
+    .not("mujifx_estimate", "is", null)
+    .order("period_covered", { ascending: false });
+
+  if (error) {
+    throw new Error(`Failed to fetch forecasts: ${error.message}`);
+  }
+
+  const latestByIndicator = new Map<string, (typeof data)[number]>();
+  for (const row of data ?? []) {
+    if (!latestByIndicator.has(row.indicator)) {
+      latestByIndicator.set(row.indicator, row);
+    }
+  }
+  return latestByIndicator;
+}
+
+/**
  * Gets the single latest data point for an indicator, or null if none exists
  * yet. Never returns fabricated data — an empty database means null, not a
  * fake number.
@@ -92,6 +121,7 @@ export async function getLatestDataPoint(indicator: IndicatorId) {
     .from("economic_data_points")
     .select("*")
     .eq("indicator", indicator)
+    .not("actual", "is", null) // exclude future forecast placeholder rows
     .order("release_date", { ascending: false })
     .limit(1)
     .maybeSingle();
@@ -144,6 +174,61 @@ export async function saveForecast(forecast: ForecastResult) {
 
   if (error) {
     throw new Error(`Failed to save forecast for ${forecast.indicator}: ${error.message}`);
+  }
+  return data;
+}
+
+/**
+ * Saves the latest AI analyst assessment. We only keep one row (the most
+ * recent), so this deletes any existing row first, then inserts fresh —
+ * simpler than upsert logic for a single-row table.
+ */
+export async function saveAnalystAssessment(
+  assessment: AnalystAssessment,
+  scoreValue: number,
+  scoreBias: string
+) {
+  await supabaseAdmin.from("analyst_assessments").delete().neq("id", 0);
+
+  const { data, error } = await supabaseAdmin
+    .from("analyst_assessments")
+    .insert({
+      currency: assessment.currency,
+      generated_at: assessment.generatedAt,
+      what_changed: assessment.whatChanged,
+      why_it_changed: assessment.whyItChanged,
+      economic_implications: assessment.economicImplications,
+      central_bank_implications: assessment.centralBankImplications,
+      market_expectations_vs_pricing: assessment.marketExpectationsVsPricing,
+      cross_asset_confirmation: assessment.crossAssetConfirmation,
+      contradictions: assessment.contradictions,
+      risks: assessment.risks,
+      final_assessment: assessment.finalAssessment,
+      disclaimer: assessment.disclaimer,
+      fundamental_score: scoreValue,
+      fundamental_bias: scoreBias,
+    })
+    .select();
+
+  if (error) {
+    throw new Error(`Failed to save analyst assessment: ${error.message}`);
+  }
+  return data;
+}
+
+/**
+ * Gets the latest saved AI analyst assessment, or null if none exists yet.
+ */
+export async function getLatestAnalystAssessment() {
+  const { data, error } = await supabase
+    .from("analyst_assessments")
+    .select("*")
+    .order("generated_at", { ascending: false })
+    .limit(1)
+    .maybeSingle();
+
+  if (error) {
+    throw new Error(`Failed to fetch analyst assessment: ${error.message}`);
   }
   return data;
 }

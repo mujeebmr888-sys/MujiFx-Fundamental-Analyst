@@ -1,5 +1,5 @@
 import SideNav from "@/components/dashboard/SideNav";
-import { getLatestForIndicators } from "@/layers/historical-database/database";
+import { getLatestForecasts } from "@/layers/historical-database/database";
 import { INDICATOR_META } from "@/config/indicators";
 import type { IndicatorId } from "@/types/economic-data";
 
@@ -11,12 +11,12 @@ const FORECAST_INDICATORS: IndicatorId[] = ["CPI", "PPI", "NFP", "GDP"];
 
 export default async function ForecastsPage() {
   let latestByIndicator: Awaited<
-    ReturnType<typeof getLatestForIndicators>
+    ReturnType<typeof getLatestForecasts>
   > | null = null;
   let debugError: string | null = null;
 
   try {
-    latestByIndicator = await getLatestForIndicators(FORECAST_INDICATORS);
+    latestByIndicator = await getLatestForecasts(FORECAST_INDICATORS);
   } catch (err) {
     debugError = err instanceof Error ? err.message : String(err);
   }

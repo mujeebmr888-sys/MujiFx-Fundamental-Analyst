@@ -16,7 +16,9 @@ export type IndicatorId =
   | "INITIAL_JOBLESS_CLAIMS"
   | "CONTINUING_CLAIMS"
   | "JOLTS"
+  | "SAHM_RULE" // FRED SAHMREALTIME — recession/stress evidence input for Employment, NOT a standalone employment score
   | "GDP"
+  | "GDP_GROWTH_RATE" // FRED A191RL1Q225SBEA — BEA's own already-annualized % change series, used as-is (no re-derivation)
   | "RETAIL_SALES"
   | "INDUSTRIAL_PRODUCTION"
   | "ISM_MANUFACTURING"
@@ -24,7 +26,8 @@ export type IndicatorId =
   | "FED_FUNDS_RATE"
   | "TREASURY_2Y"
   | "TREASURY_10Y"
-  | "BROAD_DOLLAR_INDEX";
+  | "BROAD_DOLLAR_INDEX" // Federal Reserve's own trade-weighted index (DTWEXBGS) — NOT the same index as ICE's DXY
+  | "VIX"; // FRED VIXCLS — sole Risk Environment input for now
 
 export type SourceTier = "TIER_1_OFFICIAL" | "TIER_2_NEWS" | "TIER_3_RESEARCH";
 

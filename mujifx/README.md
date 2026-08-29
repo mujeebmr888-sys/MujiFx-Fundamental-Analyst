@@ -66,16 +66,31 @@ rather than containing placeholder numbers.
 4. Visit `http://localhost:3000/api/sync/cpi` once to pull real CPI data in.
 5. Visit `http://localhost:3000` to see it on the dashboard.
 
-## Status: Milestone 8 — Fundamental Scoring (Layer 6)
+## Status: Milestone 9 — AI Analyst Reasoning (Layer 7) — the full pipeline is complete
 
-- New `USD Fundamental Bias` card at the top of the dashboard, combining
-  Fed Funds Rate, CPI, NFP, Unemployment Rate, and 10-Year Treasury Yield
-  trends into one transparent, weighted score (-10 to +10)
-- Every component of the score shows its own plain-language rationale —
-  nothing is a hidden black box
-- Explicitly labeled "not a trade signal" per the core product principle;
-  the score reflects a widely-known macro heuristic, not a proprietary or
-  guaranteed prediction
+- Layer 7 uses Google Gemini's free tier (not Anthropic) to keep this
+  free-first — one call/day comfortably fits the free quota
+- The model is given ONLY the real numbers already verified by Layers 1-6
+  (indicator data + fundamental score breakdown) and is instructed never to
+  invent data, never give trade advice, and never claim certainty; output
+  is validated (all required fields must be present as strings) before
+  being saved — if validation fails, nothing is shown rather than showing
+  a malformed result
+- New `/usd/research` page shows the full written assessment following the
+  exact reasoning chain from the spec: what changed → why → economic
+  implications → central bank implications → market expectations vs.
+  pricing → cross-asset confirmation → contradictions → risks → final
+  assessment
+- Runs automatically as the last step of the daily `/api/sync/all` cron job
+- Fixed a data-model bug: forecast placeholder rows (future periods with no
+  actual value yet) could have been picked up as "latest data" on the main
+  dashboard once forecasts started saving. `getLatestForIndicators` /
+  `getLatestDataPoint` now explicitly exclude rows with no actual value; a
+  new `getLatestForecasts` function is used specifically by the Forecasts
+  page instead.
+- Run `docs/migration_ai_analyst.sql` in Supabase once to add the new table
+  this needs, and set `GEMINI_API_KEY` (free, from
+  https://aistudio.google.com/app/apikey) in Vercel
 
 ## Next steps (see bottom of chat message)
 

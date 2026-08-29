@@ -30,8 +30,18 @@ export const INDICATOR_META: Record<IndicatorId, IndicatorMeta> = {
   },
   CONTINUING_CLAIMS: { label: "Continuing Claims", category: "Employment" },
   JOLTS: { label: "JOLTS Job Openings", category: "Employment" },
+  SAHM_RULE: {
+    label: "Sahm Rule (Recession Indicator)",
+    category: "Employment",
+    unitSuffix: "pp",
+  },
 
   GDP: { label: "GDP", category: "Growth", unitSuffix: "B$" },
+  GDP_GROWTH_RATE: {
+    label: "Real GDP Growth (Annualized)",
+    category: "Growth",
+    unitSuffix: "%",
+  },
   RETAIL_SALES: { label: "Retail Sales", category: "Growth", unitSuffix: "M$" },
   INDUSTRIAL_PRODUCTION: {
     label: "Industrial Production (Index)",
@@ -52,7 +62,8 @@ export const INDICATOR_META: Record<IndicatorId, IndicatorMeta> = {
     category: "Market",
     unitSuffix: "%",
   },
-  BROAD_DOLLAR_INDEX: { label: "Fed Broad Dollar Index", category: "Market" },
+  BROAD_DOLLAR_INDEX: { label: "US Broad Dollar Index", category: "Market" },
+  VIX: { label: "VIX (Volatility Index)", category: "Market" },
 };
 
 export const CATEGORY_ORDER: IndicatorMeta["category"][] = [

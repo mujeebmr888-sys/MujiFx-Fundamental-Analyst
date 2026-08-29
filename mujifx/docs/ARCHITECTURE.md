@@ -26,7 +26,7 @@ understand ONE format.
 
 ## Layer 3 — Historical Database (`src/layers/historical-database/`)
 
-Stores normalized data points in Firestore, keyed by indicator + release date.
+Stores normalized data points in Supabase (PostgreSQL), keyed by indicator + release date.
 This is what lets the system say "CPI has trended down for 4 straight months"
 instead of judging one release in isolation (your requirement #9).
 
@@ -41,12 +41,33 @@ For major releases (CPI, NFP, PPI), produces MUJIFX's own estimate BEFORE the
 release, along with a range, a confidence level, and the leading indicators that
 informed it. Always framed as an estimate, never a certainty (your requirement #7).
 
-## Layer 6 — Fundamental Scoring (`src/layers/fundamental-scoring/`)
+## Layer 6 — Fundamental Assessment Engine (`src/layers/fundamental-scoring/`)
 
-Converts calculated indicators into a weighted bias score using the methodology
-we discussed (interest-rate decisions weighted highest, minor indicators lowest).
-Outputs a transparent breakdown, not just one number — so the AI layer can explain
-*why*.
+**Not a weighted bullish/bearish bias score.** This layer produces a
+structured assessment for each of six categories — Inflation, Employment,
+Growth, Monetary Policy, Market Pricing, and Risk Environment (contextual)
+— following a fixed chain for every category:
+
+```
+FACTS → CALCULATIONS → INTERPRETATIONS → ASSESSMENT → CONFIDENCE →
+EVIDENCE → CONFLICTING_EVIDENCE → DATA_LIMITATIONS
+```
+
+Each category's assessment uses its own vocabulary (e.g. Strong/Moderate/
+Weak for Inflation/Employment/Growth; Hawkish/Neutral/Dovish for Monetary
+Policy/Market Pricing) rather than a generic numeric score, and every
+assessment is traceable back to the specific data and rule that produced
+it — no step is collapsed into a single opaque string or number.
+
+An orchestrator then combines the six category assessments into an Overall
+USD Fundamental Condition **without averaging them** — it evaluates how the
+categories agree or disagree and explicitly surfaces contradictions (e.g.
+strong fundamentals not confirmed by market pricing) rather than forcing a
+single directional conclusion.
+
+The full approved methodology — every indicator, calculation, threshold,
+and rule, category by category — is documented in
+`docs/methodology_fundamental_scoring.md`.
 
 ## Layer 7 — AI Analyst Reasoning (`src/layers/ai-analyst-reasoning/`)
 
