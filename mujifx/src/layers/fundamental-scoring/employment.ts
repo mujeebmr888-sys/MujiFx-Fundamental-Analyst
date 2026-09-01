@@ -203,7 +203,9 @@ export function generateEmploymentAssessment(
     });
 
     // Trend over whatever history is available (up to 12 releases back).
-    const horizonsAvailable = [3, 6, 12].filter((h) => uRateReal[h]?.actual !== null);
+    const horizonsAvailable = [3, 6, 12].filter(
+      (h) => h < uRateReal.length && uRateReal[h].actual !== null
+    );
     const trendReadings = horizonsAvailable.map((h) => ({
       months: h,
       change: round((latest.actual as number) - (uRateReal[h].actual as number)),
