@@ -104,6 +104,16 @@ export type RiskEnvironmentAssessment = CategoryAssessment<RiskLabel>;
  * collapsing them into one number. Risk Environment is included for
  * context but does not drive the overall condition (see methodology doc,
  * Section 6, for why).
+ *
+ * Maintains the same traceable FACT → CALCULATION → INTERPRETATION →
+ * ASSESSMENT → CONFIDENCE → EVIDENCE → CONFLICTING_EVIDENCE →
+ * DATA_LIMITATIONS chain as every category engine. `facts` is legitimately
+ * an empty array here by design: this layer has no NEW raw data facts of
+ * its own — its only inputs are the already-computed assessments from the
+ * six category engines, which is a CALCULATION/INTERPRETATION input, not a
+ * sourced fact (forcing a fabricated `source` reference onto a derived
+ * judgment like "Inflation=Strong" would misrepresent it as externally
+ * sourced raw data).
  */
 export interface UsdFundamentalAssessment {
   asOf: string;
@@ -118,9 +128,16 @@ export interface UsdFundamentalAssessment {
     riskEnvironment: RiskEnvironmentAssessment; // contextual only, not scored into overallCondition
   };
 
+  facts: AssessmentFact[]; // always empty at this layer — see doc comment above
+  calculations: AssessmentCalculation[]; // e.g. Strong/Weak/Moderate counts among Inflation/Employment/Growth
+  interpretations: AssessmentInterpretation[]; // which named decision rule (1-4) fired, and why
+
+  confidence: ConfidenceLevel;
+  evidence: string[];
+  /** Cross-category contradictions surfaced explicitly, e.g. "Fundamental data remains supportive, but market pricing is not confirming the macro picture." */
+  conflictingEvidence: string[];
+  dataLimitations: string[];
+
   /** Which rule-table branch was applied (see methodology doc, Orchestration section), stated in plain words. */
   rationale: string;
-
-  /** Cross-category contradictions surfaced explicitly, e.g. "Fundamental data remains supportive, but market pricing is not confirming the macro picture." */
-  contradictions: string[];
 }

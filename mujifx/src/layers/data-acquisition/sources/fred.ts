@@ -23,13 +23,16 @@ const FRED_SERIES_MAP: Partial<Record<IndicatorId, string>> = {
   INITIAL_JOBLESS_CLAIMS: "ICSA",
   CONTINUING_CLAIMS: "CCSA",
   JOLTS: "JTSJOL",
+  SAHM_RULE: "SAHMREALTIME", // FRED's own pre-calculated Sahm Rule — never recomputed in our code
   GDP: "GDP",
+  GDP_GROWTH_RATE: "A191RL1Q225SBEA", // BEA's own pre-computed Real GDP % change, SAAR — used as-is, never re-annualized
   RETAIL_SALES: "RSAFS",
   INDUSTRIAL_PRODUCTION: "INDPRO",
   FED_FUNDS_RATE: "FEDFUNDS",
   TREASURY_2Y: "DGS2",
   TREASURY_10Y: "DGS10",
   BROAD_DOLLAR_INDEX: "DTWEXBGS",
+  VIX: "VIXCLS", // CBOE VIX distributed through FRED — stored as retrieved, no additional calculation
 };
 
 // Exported so the sync-all route can loop over every mapped indicator
