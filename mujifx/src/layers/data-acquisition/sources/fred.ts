@@ -14,7 +14,7 @@ const FRED_BASE_URL = "https://api.stlouisfed.org/fred/series/observations";
 const FRED_SERIES_MAP: Partial<Record<IndicatorId, string>> = {
   CPI: "CPIAUCSL",
   CORE_CPI: "CPILFESL",
-  PCE: "PCE",
+  PCE: "PCEPI", // Personal Consumption Expenditures: Chain-type Price Index (the price index, NOT the PCE dollar-level series "PCE")
   CORE_PCE: "PCEPILFE",
   PPI: "PPIACO",
   NFP: "PAYEMS",

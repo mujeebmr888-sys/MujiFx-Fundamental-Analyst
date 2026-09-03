@@ -114,14 +114,18 @@ function buildSeriesMomentum(rows: InflationHistoryRow[], label: string) {
 
   const latest = real[0];
 
-  // MoM: uses the stored `previous` field directly on the latest row.
+  // MoM: percentage change vs the stored `previous` field on the latest
+  // row — a percentage rate, not a raw index-point difference. (This
+  // returned `mom` value is only used to populate this one displayed
+  // calculation; nothing else in this file depends on its old raw-diff
+  // form, so no separate raw index-point value needs to be preserved.)
   const mom =
-    latest && latest.actual !== null && latest.previous !== null
-      ? round(latest.actual - latest.previous)
+    latest && latest.actual !== null && latest.previous !== null && latest.previous !== 0
+      ? round(((latest.actual / latest.previous) - 1) * 100)
       : null;
   calcs.push({
-    label: `${label}: month-over-month change`,
-    formula: "latest.actual - latest.previous",
+    label: `${label}: month-over-month % change`,
+    formula: "((latest.actual / latest.previous) - 1) * 100",
     result: mom,
     unavailableReason: mom === null ? "Latest release or its previous value not available." : undefined,
   });
