@@ -134,9 +134,13 @@ export async function fetchLatestFromFred(
  * route, never by fetchLatestFromFred/ALL_FRED_INDICATORS/the daily
  * /api/sync/all cron, which continue completely unchanged.
  *
- * Each number is the exact minimum the corresponding assessment engine's
- * own calculation code requires (verified by inspecting each engine),
- * matching the same already-approved depths used by /api/assessment/usd:
+ * Each number is the TARGET VALID (non-missing) observation count each
+ * assessment engine's own calculation code requires (verified by
+ * inspecting each engine), matching the same already-approved depths
+ * used by /api/assessment/usd. fetchHistoryFromFred() below requests
+ * enough raw FRED observations to actually reach this many valid points,
+ * even if some individual FRED observations are marked missing (".").
+ * The values themselves are unchanged from before:
  *
  *   CPI/CORE_CPI/PCE/CORE_PCE/PPI/NFP/UNEMPLOYMENT_RATE/
  *   AVG_HOURLY_EARNINGS/RETAIL_SALES/INDUSTRIAL_PRODUCTION: 13
@@ -180,20 +184,39 @@ export const INDICATOR_BACKFILL_DEPTH: Partial<Record<IndicatorId, number>> = {
 };
 
 /**
- * LAYER 1 (bulk/backfill variant) — fetches up to `depth` historical
+ * LAYER 1 (bulk/backfill variant) — fetches `targetValidDepth` historical
  * observations for ONE indicator. Used only by the new one-time backfill
  * route. Does NOT modify or replace fetchLatestFromFred above, which the
  * daily /api/sync/all cron continues to use completely unchanged
  * (limit=2, single latest point).
+ *
+ * `targetValidDepth` means the number of VALID (non-missing) observations
+ * to return — NOT simply how many raw FRED observations to request. FRED
+ * occasionally marks individual observations as missing ("."), which
+ * would otherwise silently reduce the valid count below what each
+ * assessment engine actually needs even though enough real data exists
+ * further back in the series.
  *
  * CHRONOLOGICAL "previous" MAPPING: each returned point's `previous` is
  * the FRED observation immediately OLDER than it in the SAME fetched
  * batch — the identical adjacency rule fetchLatestFromFred already uses
  * for its single latest/prior pair (observations[0] vs observations[1]),
  * just applied at every index instead of only the newest one. This is
- * why `depth + 1` observations are requested from FRED: the oldest of
- * the `depth` points we actually return still needs one more, even-older
- * observation available to correctly compute ITS OWN `previous`.
+ * why one extra observation beyond `targetValidDepth` is always reserved:
+ * the oldest of the points we actually return still needs one more,
+ * even-older observation available to correctly compute ITS OWN
+ * `previous`.
+ *
+ * HANDLING MISSING OBSERVATIONS (the fix): if walking the fetched batch
+ * turns up fewer than `targetValidDepth` valid points because some were
+ * marked missing, we re-request FRED with a LARGER limit — increased by
+ * EXACTLY the observed shortfall (how many were missing + how many valid
+ * points we're still short), never by an arbitrary blind constant. This
+ * is retried up to MAX_ATTEMPTS times as a safety bound, and stops early
+ * (without retrying further) the moment FRED returns fewer observations
+ * than requested — that means the series' real history has been
+ * exhausted, and we honestly return however many valid points exist
+ * rather than fabricating or interpolating more.
  *
  * DATA INTEGRITY: observations FRED marks as missing (".") are skipped
  * entirely — never inserted, never interpolated, never fabricated. If a
@@ -203,51 +226,75 @@ export const INDICATOR_BACKFILL_DEPTH: Partial<Record<IndicatorId, number>> = {
  */
 export async function fetchHistoryFromFred(
   indicator: IndicatorId,
-  depth: number
+  targetValidDepth: number
 ): Promise<EconomicDataPoint[]> {
   const seriesId = FRED_SERIES_MAP[indicator];
   const apiKey = process.env.FRED_API_KEY;
   if (!seriesId || !apiKey) return [];
 
-  try {
-    const url = `${FRED_BASE_URL}?series_id=${seriesId}&api_key=${apiKey}&file_type=json&sort_order=desc&limit=${
-      depth + 1
-    }`;
-    const res = await fetch(url);
-    if (!res.ok) return [];
+  const MAX_ATTEMPTS = 4; // safety bound against unbounded retries — not an arbitrary depth increase
+  let requestLimit = targetValidDepth + 1;
+  let observations: Array<{ date: string; value: string }> = [];
 
-    const data = await res.json();
-    const observations: Array<{ date: string; value: string }> = data?.observations ?? [];
-
-    const points: EconomicDataPoint[] = [];
-    for (let i = 0; i < Math.min(depth, observations.length); i++) {
-      const obs = observations[i];
-      if (obs.value === ".") continue; // FRED-marked missing — skip, never fabricate
-
-      const priorObs = observations[i + 1];
-      const previous =
-        priorObs && priorObs.value !== "." ? parseFloat(priorObs.value) : null;
-
-      points.push({
-        indicator,
-        releaseDate: obs.date,
-        periodCovered: obs.date,
-        previous,
-        consensusForecast: null,
-        mujifxEstimate: null,
-        actual: parseFloat(obs.value),
-        unit: "as published by FRED (see series notes)",
-        available: true,
-        source: {
-          name: `FRED (series ${seriesId})`,
-          url: "https://fred.stlouisfed.org/",
-          tier: "TIER_1_OFFICIAL",
-          retrievedAt: new Date().toISOString(),
-        },
-      });
+  for (let attempt = 0; attempt < MAX_ATTEMPTS; attempt++) {
+    try {
+      const url = `${FRED_BASE_URL}?series_id=${seriesId}&api_key=${apiKey}&file_type=json&sort_order=desc&limit=${requestLimit}`;
+      const res = await fetch(url);
+      if (!res.ok) return [];
+      const data = await res.json();
+      observations = data?.observations ?? [];
+    } catch {
+      return [];
     }
-    return points;
-  } catch {
-    return [];
+
+    // Walk the batch, reserving the LAST fetched observation purely as a
+    // "previous" source for the oldest point we'd keep (same reservation
+    // fetchLatestFromFred's +1 always intended) — not counted as a point
+    // itself.
+    let validCount = 0;
+    let missingCount = 0;
+    for (let i = 0; i < observations.length - 1; i++) {
+      if (observations[i].value === ".") missingCount++;
+      else validCount++;
+      if (validCount >= targetValidDepth) break;
+    }
+
+    if (validCount >= targetValidDepth) break; // enough valid observations found — stop retrying
+
+    const gotFewerThanRequested = observations.length < requestLimit;
+    if (gotFewerThanRequested) break; // FRED has no more real history for this series — stop, never fabricate
+
+    // Escalate by exactly the observed shortfall (missing + still-needed), not a blind constant.
+    const deficit = targetValidDepth - validCount;
+    requestLimit = requestLimit + missingCount + deficit + 1;
   }
+
+  const points: EconomicDataPoint[] = [];
+  for (let i = 0; i < observations.length - 1 && points.length < targetValidDepth; i++) {
+    const obs = observations[i];
+    if (obs.value === ".") continue; // FRED-marked missing — skip, never fabricate
+
+    const priorObs = observations[i + 1];
+    const previous =
+      priorObs && priorObs.value !== "." ? parseFloat(priorObs.value) : null;
+
+    points.push({
+      indicator,
+      releaseDate: obs.date,
+      periodCovered: obs.date,
+      previous,
+      consensusForecast: null,
+      mujifxEstimate: null,
+      actual: parseFloat(obs.value),
+      unit: "as published by FRED (see series notes)",
+      available: true,
+      source: {
+        name: `FRED (series ${seriesId})`,
+        url: "https://fred.stlouisfed.org/",
+        tier: "TIER_1_OFFICIAL",
+        retrievedAt: new Date().toISOString(),
+      },
+    });
+  }
+  return points;
 }
