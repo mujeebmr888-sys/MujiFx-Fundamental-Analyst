@@ -1,264 +1,193 @@
-# MUJIFX Step 13H — Production Vintage Ingestion Strategy
+# MUJIFX Step 13H — Vintage Strategy and Source-Compliance Gate
 
-Status: DESIGN COMPLETE — implementation follows after this contract.
+Status: **DESIGN COMPLETE — FRED/ALFRED archival backfill BLOCKED by source terms.**
 
-## 1. Objective
+## 1. Important course correction
 
-Turn the Step 13G FRED/ALFRED vintage pilot into a production-safe historical and recurring vintage ingestion system without changing the existing fundamental assessment methodology or the current latest-data sync.
+Step 13G successfully proved that FRED/ALFRED vintage discovery, point-in-time retrieval, and the MUJIFX vintage database mechanics work.
 
-The vintage layer exists to prevent look-ahead/revision leakage in historical analysis. The current `economic_data_points` table remains the latest/current operational dataset. `indicator_observation_vintages` is the point-in-time historical layer.
+However, before implementing production archival ingestion, the FRED API Terms of Use must be respected. The current FRED terms explicitly prohibit using the FRED API for storing, caching, or archiving FRED content or incorporating FRED content into a database/archive, except where expressly permitted. They also restrict use of FRED API content for development/training of AI systems.
 
-FRED defines a vintage date as a date when a series' values were revised or new values were released, excluding dates on which the series did not change. FRED real-time periods are closed intervals and represent what information was known during that period. Therefore MUJIFX must preserve the FRED-returned real-time boundaries rather than infer them from calendar assumptions.
+Therefore MUJIFX must **not** proceed with a full FRED/ALFRED vintage backfill into `indicator_observation_vintages` under the current API-based design.
 
-## 2. Core architectural rule
+This is a better engineering decision than building a technically correct system on a source contract that does not permit the intended storage model.
 
-Maintain two independent data planes:
+Official FRED terms: https://fred.stlouisfed.org/docs/api/terms_of_use.html
 
-1. CURRENT PLANE
-   - Existing `economic_data_points`.
-   - Used by live/latest analysis.
-   - Existing `/api/sync/all` remains unchanged.
+## 2. What remains valid from Step 13G
 
-2. POINT-IN-TIME PLANE
-   - `indicator_observation_vintages`.
-   - Stores value + observation date + FRED real-time start/end.
-   - Used for historical/as-of-date analysis and future unbiased backtests.
-   - Never overwrite one vintage with another.
+The following architectural lessons remain valid:
 
-The two planes may coexist indefinitely. Vintage ingestion must not silently replace current data.
+- a point-in-time dataset is required for unbiased historical fundamental analysis;
+- `observation_date` and information-availability date must be separated;
+- historical analysis must never use today's revised value when reconstructing an earlier date;
+- initial release, later revision, and current value are different states;
+- an atomic vintage writer is technically sound;
+- the pilot demonstrated correct open/closed vintage behavior.
 
-## 3. Indicator classification
+The existing pilot rows should **not be expanded** until the project's source/data-rights decision is resolved.
 
-### MUST have vintage history
+## 3. New production rule
 
-| Indicator | FRED series | Priority | Reason |
-|---|---|---:|---|
-| CPI | CPIAUCSL | P0 | Core inflation input; seasonally adjusted CPI can be revised, including annual seasonal-factor revisions. |
-| CORE_CPI | CPILFESL | P0 | Direct inflation assessment input and subject to revisions/seasonal adjustment. |
-| PCE | PCEPI | P0 | Fed-relevant inflation input; BEA revises historical PCE data. |
-| CORE_PCE | PCEPILFE | P0 | Primary 2% target-distance input; historical revisions matter directly to policy/backtests. |
-| PPI | PPIACO | P1 | Inflation pipeline input; historical revisions and series-definition validation matter. |
-| NFP | PAYEMS | P0 | Major employment input; establishment-survey employment is revised/benchmarked. |
-| UNEMPLOYMENT_RATE | UNRATE | P0 | Employment and Sahm-related input; historical values can be revised. |
-| AVG_HOURLY_EARNINGS | CES0500000003 | P0 | Wage-pressure input; historical revisions can affect YoY/trend assessment. |
-| INITIAL_JOBLESS_CLAIMS | ICSA | P1 | Weekly labor-market trend; revised observations can affect historical signals. |
-| CONTINUING_CLAIMS | CCSA | P1 | Weekly labor-market trend; revised observations can affect historical signals. |
-| JOLTS | JTSJOL | P1 | Labor-demand input; historical survey data are revised. |
-| SAHM_RULE | SAHMREALTIME | P1 | The FRED series is explicitly the real-time Sahm Rule series; point-in-time employment stress must not use today's revised history. |
-| GDP_GROWTH_RATE | A191RL1Q225SBEA | P0 | Major growth input; GDP is heavily revision-prone and is essential for unbiased historical policy assessment. |
-| RETAIL_SALES | RSAFS | P1 | Growth input and monthly trend; revisions can change historical growth classification. |
-| INDUSTRIAL_PRODUCTION | INDPRO | P1 | Growth input; historical revisions can change trend classification. |
-| FED_FUNDS_RATE | FEDFUNDS | P0 | Policy-state history must be point-in-time when reconstructing historical monetary conditions. |
+The production MUJIFX database may only archive historical/vintage observations from a provider whose terms explicitly permit the intended storage/use, or from data files obtained under a license that permits local/database storage.
 
-### SHOULD have vintage history
+For every source we add, we must verify:
 
-| Indicator | FRED series | Priority | Reason |
-|---|---|---:|---|
-| TREASURY_2Y | DGS2 | P2 | Important market-pricing confirmation, but for market backtests timestamped market observations are more important than extensive vintage snapshots. |
-| TREASURY_10Y | DGS10 | P2 | Same as 2Y; useful for historical curve context, but not as revision-sensitive as macro releases. |
-| BROAD_DOLLAR_INDEX | DTWEXBGS | P2 | Useful as historical market confirmation/divergence; long vintage history is lower priority. |
-| VIX | VIXCLS | P2 | Useful risk context; market-history accuracy matters more than storing every FRED vintage indefinitely. Pilot already proves the vintage layer works for it. |
+1. API/data-access permission;
+2. archival/storage permission;
+3. redistribution/display permission if the data will appear in the public app;
+4. revision/vintage availability;
+5. attribution requirements;
+6. rate limits;
+7. whether AI/LLM processing is permitted.
 
-### NOT required as a separate vintage priority
+Do not infer permission merely because an API is free or public.
 
-None of the current 20 indicators should be deleted from consideration. The four P2 market indicators can be ingested after the macro P0/P1 layer. Their current/latest histories remain fully usable for ordinary charting.
+## 4. Source migration direction
 
-## 4. Vintage depth policy
+The project should move the authoritative acquisition layer away from FRED for data that MUJIFX intends to store.
 
-Do NOT use an arbitrary number of vintages per series. Depth is defined by historical coverage and release/change events.
+### BLS-origin indicators
 
-### Initial production target
+Prefer the authoritative BLS source for:
 
-- P0 macro indicators: **10 years of vintage coverage, or all available vintages if the series began less than 10 years ago**.
-- P1 macro indicators: **7 years of vintage coverage**.
-- P2 market indicators: **3 years of vintage coverage initially**.
-- SAHM_RULE: **same 7-year window as P1 employment**, because its value is a derived real-time signal and must remain historically point-in-time.
+- CPI
+- CORE_CPI
+- PPI
+- NFP / payroll employment
+- UNEMPLOYMENT_RATE
+- AVG_HOURLY_EARNINGS
+- INITIAL_JOBLESS_CLAIMS
+- CONTINUING_CLAIMS
+- JOLTS
 
-The target is a DATE WINDOW, not a fixed row count. FRED's `vintagedates` endpoint already identifies dates when a series actually changed, so ingestion should select those dates rather than fabricate a regular schedule.
+BLS states that its public data can be downloaded and used for secondary analysis, while requiring appropriate citation and preserving the distinction that BLS cannot vouch for downstream analyses after retrieval.
 
-### Why date-window coverage is preferred
+Official BLS terms: https://www.bls.gov/developers/termsOfService.htm
+Official BLS API: https://www.bls.gov/bls/api_features.htm
 
-A fixed count such as "100 vintages" is not comparable across monthly, weekly, daily, and quarterly series. A 10-year calendar window provides comparable historical coverage while allowing each series to retain its real revision/release frequency.
+### BEA-origin indicators
 
-## 5. What each dataset means
+Prefer the authoritative BEA source for:
 
-### Current/latest
+- PCE
+- CORE_PCE
+- GDP / GDP growth
+- other BEA-origin macro series added later
 
-The value currently available from FRED. This is appropriate for live analysis but can contain later revisions to historical observations.
+BEA provides an official API for programmatic retrieval of published economic statistics. Its API registration requires agreement to the published terms of service, so the project's final storage policy must be checked against those terms before archival implementation.
 
-### Historical vintage
+Official BEA API: https://apps.bea.gov/api/signup/
 
-A value as it existed in a particular FRED real-time period. This is the primary dataset for reconstructing what an analyst could have known at the time.
+### Federal Reserve / Treasury / CBOE-origin indicators
 
-### Initial release
+For:
 
-The first FRED vintage in which an observation became available. This is useful for measuring first-release surprises and revision magnitude, but it is NOT automatically the correct dataset for every historical backtest.
+- FED_FUNDS_RATE
+- TREASURY_2Y
+- TREASURY_10Y
+- BROAD_DOLLAR_INDEX
+- VIX
 
-### Point-in-time / as-of-date
+use the authoritative originating provider where a storage-permitting machine-readable source is available. FRED may remain a discovery/reference layer, but it should not automatically become the archival source merely because it aggregates the series.
 
-For an analysis date T, select the latest vintage whose real-time period contains T. This is the canonical dataset for historical fundamental reconstruction.
+## 5. Vintage strategy after source migration
 
-## 6. Correct dataset by use case
+The target architecture remains:
 
-| Use case | Dataset |
-|---|---|
-| Current live fundamental analysis | Current/latest plane |
-| Historical fundamental report | Point-in-time/as-of-date vintage |
-| Unbiased historical backtest | Point-in-time/as-of-date vintage |
-| First-release surprise study | Initial-release vintage |
-| Revision analysis | Compare initial release vs later/current vintages |
-| Current charting | Current/latest plane |
+CURRENT PLANE
+→ latest authoritative observation used for live analysis.
 
-Never use today's revised observation to simulate what was known on a historical date.
+POINT-IN-TIME PLANE
+→ immutable observation versions containing:
+- indicator
+- observation date
+- value
+- information/release date where officially available
+- retrieval timestamp
+- source/version metadata
 
-## 7. Production ingestion algorithm
+The exact vintage schema may be retained conceptually, but its source-specific fields must not pretend that every provider exposes FRED-style `realtime_start`/`realtime_end`.
 
-### One-time historical backfill
+Provider-specific version semantics must be normalized into a common internal concept such as:
 
-For each enabled indicator:
+- `available_from`
+- `available_until`
+- `vintage_key`
+- `source_version`
 
-1. Determine the indicator's configured historical coverage start date.
-2. Call FRED `series/vintagedates` for the series.
-3. Keep vintage dates inside the configured coverage window.
-4. Fetch each selected vintage individually using a point-in-time real-time window (`realtime_start = T`, `realtime_end = T`).
-5. Preserve FRED's returned `realtime_start` and `realtime_end` exactly.
-6. Normalize each observation:
-   - numeric value → `is_missing=false`, value numeric
-   - `.` → `is_missing=true`, value NULL
-7. Save through the existing atomic writer.
-8. Use `(indicator, observation_date, realtime_start)` as the natural idempotency key.
-9. If a vintage fetch fails, record the error and continue with the next vintage; never substitute current data.
-10. Produce an ingestion report containing attempted, fetched, saved, skipped, missing, and failed counts.
+where the source actually supports those concepts.
 
-### Recurring vintage update
+## 6. Historical analysis rules
 
-Do not repeatedly download the entire historical window.
+For a historical analysis date T:
 
-On each scheduled update:
+1. Select only data officially available by T.
+2. Never fall back to a later revision when the historical source version is unavailable.
+3. Keep observation date separate from release/availability date.
+4. Keep consensus/forecast timestamp separate from actual data timestamp.
+5. Derived indicators must use point-in-time inputs consistently.
+6. If exact release time is unavailable, the system must label the analysis as date-level rather than intraday.
 
-1. Discover FRED vintage dates for each enabled indicator.
-2. Compare discovered dates with the latest stored `realtime_start` / stored coverage.
-3. Fetch only new or not-yet-verified vintage dates, plus a small configurable overlap window for safety.
-4. Save idempotently.
-5. Leave the existing latest-data `/api/sync/all` path untouched.
+## 7. Initial-release vs revised-value semantics
 
-The overlap exists because a retry/redeployment can occur around a release boundary; idempotent storage makes re-fetching safe.
+The future system should distinguish:
 
-## 8. Why we use FRED vintage dates rather than a guessed release calendar
+- **initial release** — first published value available to the analyst;
+- **subsequent revision** — later official change to that observation;
+- **current value** — latest known revision;
+- **point-in-time value** — value available as of a historical date.
 
-FRED's `series/vintagedates` returns dates when the series actually changed. Release calendars are broader publication events and do not establish that a particular series' observation changed on every release date.
+These are different analytical objects and must never be silently substituted for one another.
 
-Therefore:
+## 8. What NOT to implement now
 
-- series vintagedates = source of truth for vintage ingestion
-- release calendar = future enhancement for official release metadata/timestamps
+Do not:
 
-Do not infer `release_date` from `observation_date`.
+- run a full FRED/ALFRED vintage backfill;
+- add a FRED archival cron;
+- build a FRED-to-Supabase historical archive;
+- use FRED vintage data as training data for the AI layer;
+- expand the Step 13G pilot into production storage.
 
-## 9. Look-ahead and revision safeguards
+## 9. What to do instead
 
-The vintage layer must enforce these rules:
+### Step 13I — Authoritative-source acquisition audit
 
-1. Historical calculations may only read vintages available by the analysis/as-of date.
-2. Never fall back from a missing historical vintage to the current value.
-3. Never calculate a historical surprise using today's consensus/current value.
-4. Never use an observation whose `realtime_start` is after the historical analysis date.
-5. Never assume `observation_date` equals release date.
-6. Never overwrite an older vintage with a revised value.
-7. Preserve the open-ended latest vintage with `realtime_end = NULL` only when that is the stored current open vintage.
-8. Preserve FRED-returned real-time boundaries; do not manufacture end dates from the next discovered vintage in application code.
-9. Derived indicators must be calculated from the same point-in-time vintage family as their inputs.
-10. Daily market data and macro release data must not be conflated: market timestamp/history is a separate concern from macro-data revision history.
+Before writing more vintage code, map every current indicator to its originating provider and determine:
 
-## 10. Important limitation: date-level, not intraday
+1. official API/file endpoint;
+2. whether historical revisions are exposed;
+3. whether vintage/version history is available;
+4. whether storage/archival is permitted;
+5. attribution requirements;
+6. rate limits;
+7. release-date/timestamp availability;
+8. whether the source can support the exact MUJIFX calculations.
 
-FRED/ALFRED real-time periods are date-based. This vintage layer can reconstruct information known during a calendar date, but it does not by itself establish the exact release timestamp or the exact minute a market could have reacted.
+### Step 13J — Source-specific ingestion contracts
 
-Therefore a future intraday event/backtest engine must add official release timestamps and timezone handling separately. Do not pretend the vintage table provides intraday release timing.
+Only after 13I should we implement provider-specific ingestion. BLS, BEA, Federal Reserve/Treasury, and CBOE-origin data should not be forced into one provider's semantics.
 
-## 11. Initial release handling
+### Step 13K — Point-in-time database implementation
 
-Do not create a second table for initial releases.
+Build the final versioned observation model only after the permitted source contracts are known.
 
-Initial release is represented by the earliest available vintage for an observation. A future helper/query can select the earliest `realtime_start` for each `(indicator, observation_date)`.
+## 10. Why this is the correct architecture
 
-This keeps one authoritative vintage table and avoids duplicate storage models.
+A fundamental-analysis engine is only as reliable as its data provenance. A technically perfect vintage database built from a source that does not permit archival use is not production-grade.
 
-## 12. Atomic writer contract
+MUJIFX should prioritize:
 
-The existing writer remains the only production write path for the vintage table.
+**authoritative source → permitted storage → provenance → point-in-time correctness → calculations → assessment → AI explanation → frontend.**
 
-Required properties:
+That order is now locked for the project.
 
-- close the currently open vintage for the same indicator + observation date when a newer vintage supersedes it;
-- insert the new vintage atomically;
-- preserve old rows;
-- enforce unique `(indicator, observation_date, realtime_start)`;
-- preserve NULL/open semantics for the latest vintage;
-- remain safe under retry;
-- avoid partial close-without-insert states.
+## 11. References
 
-## 13. Rollout phases
-
-### Phase 1 — P0 macro core
-
-CPI, CORE_CPI, PCE, CORE_PCE, NFP, UNEMPLOYMENT_RATE, AVG_HOURLY_EARNINGS, GDP_GROWTH_RATE, FED_FUNDS_RATE.
-
-Target: 10 years where available.
-
-### Phase 2 — P1 macro expansion
-
-PPI, INITIAL_JOBLESS_CLAIMS, CONTINUING_CLAIMS, JOLTS, SAHM_RULE, RETAIL_SALES, INDUSTRIAL_PRODUCTION.
-
-Target: 7 years.
-
-### Phase 3 — P2 market context
-
-TREASURY_2Y, TREASURY_10Y, BROAD_DOLLAR_INDEX, VIX.
-
-Target: 3 years initially.
-
-The existing Step 13G VIX/GDP pilot rows remain valid and must be reused rather than duplicated.
-
-## 14. Pre-backfill validation checklist
-
-Before Phase 1 is allowed to run:
-
-- [x] `indicator_observation_vintages` exists.
-- [x] strict value/missing constraint exists.
-- [x] natural key exists.
-- [x] one-open-vintage partial unique index exists.
-- [x] atomic writer exists and has been executed in Supabase.
-- [x] GDP + VIX pilot successfully discovered, fetched, and stored multiple vintages.
-- [x] old vintages close and latest vintage remains open.
-- [ ] production ingestion route has date-window configuration.
-- [ ] production route has bounded execution / batching appropriate for Vercel.
-- [ ] production route has resumability/idempotency reporting.
-- [ ] as-of-date read helper exists and is tested against pilot rows.
-- [ ] no assessment engine reads the vintage table yet.
-- [ ] full backfill is isolated from `/api/sync/all`.
-- [ ] PPI series mapping has been separately validated against the intended PPI concept before it is used as a high-confidence inflation input.
-
-## 15. Required next implementation
-
-Step 13I should implement the production vintage ingestion infrastructure only:
-
-1. shared vintage coverage configuration;
-2. reusable production vintage fetcher;
-3. batched/resumable backfill route;
-4. recurring incremental vintage update route/function;
-5. point-in-time query helper;
-6. ingestion result/audit reporting;
-7. no changes to assessment calculations;
-8. no full backfill automatically triggered by deployment.
-
-Only after Step 13I is tested should the actual Phase 1 backfill be run.
-
-## 16. Official references
-
-- FRED `series/vintagedates`: https://fred.stlouisfed.org/docs/api/fred/series_vintagedates.html
-- FRED `series/observations`: https://fred.stlouisfed.org/docs/api/fred/series_observations.html
+- FRED API Terms of Use: https://fred.stlouisfed.org/docs/api/terms_of_use.html
 - FRED real-time periods: https://fred.stlouisfed.org/docs/api/fred/realtime_period.html
-- FRED release dates: https://fred.stlouisfed.org/docs/api/fred/releases_dates.html
-- BLS CPI seasonal adjustment/revisions: https://www.bls.gov/cpi/seasonal-adjustment/
-- BLS revisions overview: https://www.bls.gov/about-bls/revisions.htm
+- FRED vintage dates: https://fred.stlouisfed.org/docs/api/fred/series_vintagedates.html
+- BLS API Terms of Service: https://www.bls.gov/developers/termsOfService.htm
+- BLS Public Data API: https://www.bls.gov/bls/api_features.htm
+- BEA API registration/documentation: https://apps.bea.gov/api/signup/
