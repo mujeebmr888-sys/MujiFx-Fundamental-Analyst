@@ -8,8 +8,9 @@
  * - GDP_GROWTH_RATE: Q1 2014, using the official FRED vintage dates that
  *   fall between 2014-04-30 and 2014-06-25. This is a real revision window,
  *   discovered from FRED rather than hard-coded values.
- * - VIX: a small recent vintage sample, with revision status observed rather
- *   than assumed.
+ * - VIX: a small recent vintage sample. Each selected vintage is queried
+ *   against an observation window ending immediately before that vintage,
+ *   so the pilot tests historical availability rather than today's data.
  */
 
 import { NextRequest, NextResponse } from "next/server";
@@ -40,6 +41,12 @@ function authorized(request: NextRequest): boolean {
 
 function dateInRange(date: string, start: string, end: string): boolean {
   return date >= start && date <= end;
+}
+
+function addUtcDays(date: string, days: number): string {
+  const value = new Date(`${date}T00:00:00Z`);
+  value.setUTCDate(value.getUTCDate() + days);
+  return value.toISOString().slice(0, 10);
 }
 
 export async function GET(request: NextRequest) {
@@ -121,19 +128,19 @@ export async function GET(request: NextRequest) {
       .sort((a, b) => a.localeCompare(b));
     result.vix.selectedVintageDates = selected;
 
-    const observationEnd = new Date();
-    const observationStart = new Date(observationEnd);
-    observationStart.setUTCDate(observationStart.getUTCDate() - VIX_OBSERVATION_DAYS);
-    const start = observationStart.toISOString().slice(0, 10);
-    const end = observationEnd.toISOString().slice(0, 10);
-
     for (const vintageDate of selected) {
       try {
+        const observationEnd = addUtcDays(vintageDate, -1);
+        const observationStart = addUtcDays(
+          observationEnd,
+          -(VIX_OBSERVATION_DAYS - 1)
+        );
+
         const rows = await fetchObservationAtVintage(
           VIX_INDICATOR,
           vintageDate,
-          start,
-          end
+          observationStart,
+          observationEnd
         );
         result.vix.fetchedRows += rows.length;
 
