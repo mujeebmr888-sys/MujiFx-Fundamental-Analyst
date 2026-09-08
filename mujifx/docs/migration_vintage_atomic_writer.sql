@@ -2,7 +2,7 @@
 -- Run AFTER migration_vintage_observations.sql in Supabase SQL Editor.
 -- This is additive: it creates/replaces only the narrow writer function.
 
-create or replace function save_indicator_observation_vintage(
+create or replace function public.save_indicator_observation_vintage(
   p_indicator text,
   p_observation_date date,
   p_value numeric,
@@ -13,14 +13,14 @@ create or replace function save_indicator_observation_vintage(
   p_source_url text,
   p_source_tier text
 )
-returns indicator_observation_vintages
+returns public.indicator_observation_vintages
 language plpgsql
 security definer
-set search_path = public
+set search_path = ''
 as $$
 declare
-  existing_row indicator_observation_vintages%rowtype;
-  inserted_row indicator_observation_vintages%rowtype;
+  existing_row public.indicator_observation_vintages%rowtype;
+  inserted_row public.indicator_observation_vintages%rowtype;
   lock_key bigint;
 begin
   if p_is_missing and p_value is not null then
@@ -38,7 +38,7 @@ begin
   perform pg_advisory_xact_lock(lock_key);
 
   select * into existing_row
-  from indicator_observation_vintages
+  from public.indicator_observation_vintages
   where indicator = p_indicator
     and observation_date = p_observation_date
     and realtime_start = p_realtime_start;
@@ -51,7 +51,7 @@ begin
   -- out-of-order insert instead of ever corrupting the open-vintage chain.
   if exists (
     select 1
-    from indicator_observation_vintages
+    from public.indicator_observation_vintages
     where indicator = p_indicator
       and observation_date = p_observation_date
       and realtime_start > p_realtime_start
@@ -61,14 +61,14 @@ begin
       p_realtime_start, p_indicator, p_observation_date;
   end if;
 
-  update indicator_observation_vintages
+  update public.indicator_observation_vintages
   set realtime_end = p_realtime_start - 1
   where indicator = p_indicator
     and observation_date = p_observation_date
     and realtime_end is null
     and realtime_start < p_realtime_start;
 
-  insert into indicator_observation_vintages (
+  insert into public.indicator_observation_vintages (
     indicator,
     observation_date,
     value,
@@ -97,10 +97,10 @@ begin
 end;
 $$;
 
-revoke all on function save_indicator_observation_vintage(
+revoke all on function public.save_indicator_observation_vintage(
   text, date, numeric, boolean, date, timestamptz, text, text, text
 ) from public;
 
-grant execute on function save_indicator_observation_vintage(
+grant execute on function public.save_indicator_observation_vintage(
   text, date, numeric, boolean, date, timestamptz, text, text, text
 ) to service_role;
