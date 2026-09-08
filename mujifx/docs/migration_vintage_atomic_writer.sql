@@ -47,6 +47,20 @@ begin
     return existing_row;
   end if;
 
+  -- The pilot processes vintage dates in chronological order. Reject an
+  -- out-of-order insert instead of ever corrupting the open-vintage chain.
+  if exists (
+    select 1
+    from indicator_observation_vintages
+    where indicator = p_indicator
+      and observation_date = p_observation_date
+      and realtime_start > p_realtime_start
+  ) then
+    raise exception
+      'Vintage % is older than an already-stored vintage for %/%',
+      p_realtime_start, p_indicator, p_observation_date;
+  end if;
+
   update indicator_observation_vintages
   set realtime_end = p_realtime_start - 1
   where indicator = p_indicator
@@ -86,3 +100,7 @@ $$;
 revoke all on function save_indicator_observation_vintage(
   text, date, numeric, boolean, date, timestamptz, text, text, text
 ) from public;
+
+grant execute on function save_indicator_observation_vintage(
+  text, date, numeric, boolean, date, timestamptz, text, text, text
+) to service_role;
