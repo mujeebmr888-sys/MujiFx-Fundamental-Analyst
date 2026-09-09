@@ -2,11 +2,12 @@
  * STEP 13J — BLS CORE CPI SOURCE PILOT
  *
  * Isolated, read-only source adapter for the authoritative BLS Core CPI
- * series. This pilot intentionally does NOT write to the production
- * database and does NOT replace the existing FRED transport yet.
+ * series. The adapter returns source observations only; database persistence
+ * is handled by the shared authoritative writer.
  */
 
 const BLS_API_URL = "https://api.bls.gov/publicAPI/v2/timeseries/data/";
+const BLS_API_KEY_ENV = "BLS";
 
 export const BLS_CORE_CPI_SERIES_ID = "CUSR0000SA0L1E";
 
@@ -67,6 +68,11 @@ export async function fetchBlsCoreCpiPilot(
   url.searchParams.set("seriesid", BLS_CORE_CPI_SERIES_ID);
   url.searchParams.set("startyear", String(startYear));
   url.searchParams.set("endyear", String(endYear));
+
+  const apiKey = process.env[BLS_API_KEY_ENV];
+  if (apiKey) {
+    url.searchParams.set("registrationkey", apiKey);
+  }
 
   const res = await fetch(url.toString(), {
     headers: { Accept: "application/json" },
