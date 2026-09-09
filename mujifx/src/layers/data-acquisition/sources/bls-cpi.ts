@@ -1,9 +1,9 @@
 /**
- * STEP 13J — BLS CPI SOURCE PILOT
+ * STEP 13K — BLS CPI AUTHORITATIVE SOURCE ADAPTER
  *
- * Isolated, read-only source adapter for the authoritative BLS CPI series.
- * This pilot intentionally does NOT write to the production database and
- * does NOT replace the existing FRED transport yet.
+ * Server-side, read-only source adapter for the authoritative BLS CPI series.
+ * The adapter itself does not write to Supabase; the authoritative ingestion
+ * route passes its observations to the shared authoritative writer.
  *
  * If configured, the registered BLS API key is read server-side from the
  * Vercel environment variable named BLS. The public endpoint still works
