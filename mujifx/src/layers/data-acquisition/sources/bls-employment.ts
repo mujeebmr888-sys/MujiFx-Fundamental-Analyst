@@ -7,9 +7,13 @@
  * This pilot intentionally does NOT write to the production database,
  * does NOT assign releaseDate from observation period, and does NOT replace
  * the existing FRED transport yet.
+ *
+ * If configured, the registered BLS API key is read server-side from the
+ * Vercel environment variable named BLS.
  */
 
 const BLS_API_URL = "https://api.bls.gov/publicAPI/v2/timeseries/data/";
+const BLS_API_KEY_ENV = "BLS";
 
 export const BLS_EMPLOYMENT_SERIES = {
   NFP: "CES0000000001",
@@ -84,6 +88,11 @@ export async function fetchBlsEmploymentPilot(
   );
   url.searchParams.set("startyear", String(startYear));
   url.searchParams.set("endyear", String(endYear));
+
+  const apiKey = process.env[BLS_API_KEY_ENV]?.trim();
+  if (apiKey) {
+    url.searchParams.set("registrationkey", apiKey);
+  }
 
   const res = await fetch(url.toString(), {
     headers: { Accept: "application/json" },
