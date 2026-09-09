@@ -36,6 +36,9 @@ export async function saveDataPoint(row: EconomicDataRow) {
 
 /**
  * Gets recent history for one indicator, most recent first.
+ * Uses period_covered rather than release_date because legacy rows may have
+ * release_date populated from the observation period and authoritative rows
+ * may not have a verified source release date yet.
  * Used for trend detection (requirement #9 — never judge one release alone).
  */
 export async function getIndicatorHistory(
@@ -46,7 +49,7 @@ export async function getIndicatorHistory(
     .from("economic_data_points")
     .select("*")
     .eq("indicator", indicator)
-    .order("release_date", { ascending: false })
+    .order("period_covered", { ascending: false })
     .limit(limit);
 
   if (error) {
@@ -67,7 +70,7 @@ export async function getLatestForIndicators(indicators: IndicatorId[]) {
     .select("*")
     .in("indicator", indicators)
     .not("actual", "is", null) // exclude future forecast placeholder rows
-    .order("release_date", { ascending: false });
+    .order("period_covered", { ascending: false });
 
   if (error) {
     throw new Error(`Failed to fetch latest indicators: ${error.message}`);
@@ -76,7 +79,7 @@ export async function getLatestForIndicators(indicators: IndicatorId[]) {
   const latestByIndicator = new Map<string, (typeof data)[number]>();
   for (const row of data ?? []) {
     // Rows are ordered newest-first, so the first time we see an indicator
-    // is its latest release — skip any further (older) rows for it.
+    // is its latest observation period — skip any further (older) rows for it.
     if (!latestByIndicator.has(row.indicator)) {
       latestByIndicator.set(row.indicator, row);
     }
@@ -122,7 +125,7 @@ export async function getLatestDataPoint(indicator: IndicatorId) {
     .select("*")
     .eq("indicator", indicator)
     .not("actual", "is", null) // exclude future forecast placeholder rows
-    .order("release_date", { ascending: false })
+    .order("period_covered", { ascending: false })
     .limit(1)
     .maybeSingle();
 
