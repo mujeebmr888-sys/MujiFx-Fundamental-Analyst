@@ -4,13 +4,14 @@
  * Isolated, read-only adapter for BEA NIPA Table 2.8.7.
  * It intentionally does NOT write to the production database.
  *
- * BEA's API requires a registered UserID/API key. The key is injected by
- * the caller and is never stored in source code or the database.
+ * BEA's API requires a registered UserID/API key. In production the key is
+ * read server-side from the Vercel environment variable named BEA.
  */
 
 const BEA_API_URL = "https://apps.bea.gov/api/data/";
 const BEA_DATASET = "NIPA";
 const BEA_TABLE = "T20807";
+const BEA_API_KEY_ENV = "BEA";
 
 export const BEA_PCE_LINE_CODE = 1;
 export const BEA_CORE_PCE_LINE_CODE = 25;
@@ -48,6 +49,16 @@ interface BeaApiResponse {
   };
 }
 
+function resolveBeaUserId(userId?: string): string {
+  const configured = userId?.trim() || process.env[BEA_API_KEY_ENV]?.trim();
+  if (!configured) {
+    throw new Error(
+      `BEA PCE pilot requires a BEA UserID/API key. Configure the Vercel environment variable ${BEA_API_KEY_ENV}.`
+    );
+  }
+  return configured;
+}
+
 /**
  * Fetches monthly PCE and core PCE percent changes from BEA NIPA Table 2.8.7.
  *
@@ -56,15 +67,13 @@ interface BeaApiResponse {
  * only and deliberately does not infer releaseDate from TimePeriod.
  */
 export async function fetchBeaPcePilot(
-  userId: string,
+  userId?: string,
   years: string = "LAST5"
 ): Promise<BeaPcePilotResult> {
-  if (!userId.trim()) {
-    throw new Error("BEA PCE pilot requires a BEA UserID/API key.");
-  }
+  const resolvedUserId = resolveBeaUserId(userId);
 
   const url = new URL(BEA_API_URL);
-  url.searchParams.set("UserID", userId);
+  url.searchParams.set("UserID", resolvedUserId);
   url.searchParams.set("method", "GETDATA");
   url.searchParams.set("datasetname", BEA_DATASET);
   url.searchParams.set("TableName", BEA_TABLE);
