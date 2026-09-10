@@ -35,11 +35,14 @@ export async function saveDataPoint(row: EconomicDataRow) {
 }
 
 /**
- * Gets recent history for one indicator, most recent first.
+ * Gets recent REAL history for one indicator, most recent first.
+ * Forecast placeholders are deliberately excluded because they have
+ * actual = null and must never participate in deterministic category
+ * calculations or confidence checks.
+ *
  * Uses period_covered rather than release_date because legacy rows may have
  * release_date populated from the observation period and authoritative rows
  * may not have a verified source release date yet.
- * Used for trend detection (requirement #9 — never judge one release alone).
  */
 export async function getIndicatorHistory(
   indicator: IndicatorId,
@@ -49,6 +52,7 @@ export async function getIndicatorHistory(
     .from("economic_data_points")
     .select("*")
     .eq("indicator", indicator)
+    .not("actual", "is", null)
     .order("period_covered", { ascending: false })
     .limit(limit);
 
@@ -69,7 +73,7 @@ export async function getLatestForIndicators(indicators: IndicatorId[]) {
     .from("economic_data_points")
     .select("*")
     .in("indicator", indicators)
-    .not("actual", "is", null) // exclude future forecast placeholder rows
+    .not("actual", "is", null)
     .order("period_covered", { ascending: false });
 
   if (error) {
@@ -124,7 +128,7 @@ export async function getLatestDataPoint(indicator: IndicatorId) {
     .from("economic_data_points")
     .select("*")
     .eq("indicator", indicator)
-    .not("actual", "is", null) // exclude future forecast placeholder rows
+    .not("actual", "is", null)
     .order("period_covered", { ascending: false })
     .limit(1)
     .maybeSingle();
