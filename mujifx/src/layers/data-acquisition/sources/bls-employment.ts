@@ -128,14 +128,19 @@ export async function fetchBlsEmploymentPilot(
   const observations: BlsEmploymentObservation[] = [];
 
   for (const series of returnedSeries) {
-    if (!series.seriesID || !isEmploymentSeries(series.seriesID)) {
+    const seriesId = series.seriesID;
+    if (!seriesId || !isEmploymentSeries(seriesId)) {
       continue;
     }
 
     for (const item of series.data ?? []) {
+      const year = item.year;
+      const period = item.period;
+
       if (
-        !item.year ||
-        !/^M(0[1-9]|1[0-2])$/.test(item.period ?? "") ||
+        !year ||
+        !period ||
+        !/^M(0[1-9]|1[0-2])$/.test(period) ||
         item.value == null ||
         item.value === "."
       ) {
@@ -148,9 +153,9 @@ export async function fetchBlsEmploymentPilot(
       }
 
       observations.push({
-        seriesId: series.seriesID,
-        year: item.year,
-        period: item.period,
+        seriesId,
+        year,
+        period,
         periodName: item.periodName ?? "",
         value,
         footnotes: (item.footnotes ?? []).map((footnote) => ({
