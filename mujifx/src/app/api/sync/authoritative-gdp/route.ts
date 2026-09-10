@@ -16,32 +16,46 @@ import type { AuthoritativeObservation } from "@/layers/data-acquisition/authori
 
 export const dynamic = "force-dynamic";
 
+function normalizeBeaQuarter(timePeriod: string): string | null {
+  const match = /^(\d{4})Q([1-4])$/.exec(timePeriod);
+  if (!match) return null;
+
+  const monthByQuarter = { "1": "01", "2": "04", "3": "07", "4": "10" } as const;
+  return `${match[1]}-${monthByQuarter[match[2] as keyof typeof monthByQuarter]}`;
+}
+
 export async function GET() {
   try {
     const result = await fetchBeaGdpGrowthPilot(undefined, "LAST5");
 
-    const sorted = [...result.observations]
+    const normalized = result.observations
+      .filter((observation) => observation.lineCode === BEA_GDP_GROWTH_LINE_CODE)
+      .map((observation) => ({
+        observation,
+        period: normalizeBeaQuarter(observation.timePeriod),
+      }))
       .filter(
-        (observation) =>
-          observation.lineCode === BEA_GDP_GROWTH_LINE_CODE &&
-          /^\d{4}:Q[1-4]$/.test(observation.timePeriod)
+        (entry): entry is {
+          observation: (typeof result.observations)[number];
+          period: string;
+        } => Boolean(entry.period)
       )
-      .sort((a, b) => a.timePeriod.localeCompare(b.timePeriod));
+      .sort((a, b) => a.period.localeCompare(b.period));
 
-    const observations: AuthoritativeObservation[] = sorted.map(
-      (observation, index) => ({
+    const observations: AuthoritativeObservation[] = normalized.map(
+      (entry, index) => ({
         indicator: "GDP_GROWTH_RATE",
-        periodCovered: observation.timePeriod,
-        actual: observation.value,
+        periodCovered: entry.period,
+        actual: entry.observation.value,
         unit: "Percent change at seasonally adjusted annual rate",
         sourceName: "U.S. Bureau of Economic Analysis (BEA)",
         sourceUrl: "https://apps.bea.gov/api/data/",
         sourceTier: "TIER_1_OFFICIAL",
-        sourceObservationId: `NIPA:T10101:${BEA_GDP_GROWTH_LINE_CODE}:${observation.timePeriod}`,
+        sourceObservationId: `NIPA:T10101:${BEA_GDP_GROWTH_LINE_CODE}:${entry.observation.timePeriod}`,
         sourceReleaseDate: null,
         sourceReleaseDateVerified: false,
         retrievedAt: result.retrievedAt,
-        previous: index > 0 ? sorted[index - 1].value : null,
+        previous: index > 0 ? normalized[index - 1].observation.value : null,
       })
     );
 
