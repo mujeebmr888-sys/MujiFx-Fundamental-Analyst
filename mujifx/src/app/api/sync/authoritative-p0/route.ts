@@ -71,11 +71,7 @@ function mapBlsIndexRows(
 
 function mapBlsEmploymentRows(
   seriesId: string,
-  rows: Array<{
-    year: string;
-    period: string;
-    value: number;
-  }>,
+  rows: Array<{ year: string; period: string; value: number }>,
   retrievedAt: string
 ): AuthoritativeObservation[] {
   const indicatorBySeries = {
@@ -116,6 +112,18 @@ function mapBlsEmploymentRows(
   }));
 }
 
+function normalizeBeaMonth(timePeriod: string): string | null {
+  const match = /^(\d{4})M(0[1-9]|1[0-2])$/.exec(timePeriod);
+  return match ? `${match[1]}-${match[2]}` : null;
+}
+
+function normalizeBeaQuarter(timePeriod: string): string | null {
+  const match = /^(\d{4})Q([1-4])$/.exec(timePeriod);
+  if (!match) return null;
+  const monthByQuarter = { "1": "01", "2": "04", "3": "07", "4": "10" } as const;
+  return `${match[1]}-${monthByQuarter[match[2] as keyof typeof monthByQuarter]}`;
+}
+
 export async function GET() {
   try {
     const endYear = new Date().getUTCFullYear();
@@ -151,51 +159,66 @@ export async function GET() {
 
     for (const lineCode of [BEA_PCE_LINE_CODE, BEA_CORE_PCE_LINE_CODE]) {
       const indicator = lineCode === BEA_PCE_LINE_CODE ? "PCE" : "CORE_PCE";
-      const rows = pce.observations
+      const normalized = pce.observations
         .filter((observation) => observation.lineCode === lineCode)
-        .filter((observation) => /^\d{4}-\d{2}$/.test(observation.timePeriod))
-        .sort((a, b) => a.timePeriod.localeCompare(b.timePeriod));
+        .map((observation) => ({
+          observation,
+          period: normalizeBeaMonth(observation.timePeriod),
+        }))
+        .filter(
+          (entry): entry is {
+            observation: (typeof pce.observations)[number];
+            period: string;
+          } => Boolean(entry.period)
+        )
+        .sort((a, b) => a.period.localeCompare(b.period));
 
-      rows.forEach((row, index) => {
+      normalized.forEach((entry, index) => {
         observations.push({
           indicator,
-          periodCovered: row.timePeriod,
-          actual: row.value,
+          periodCovered: entry.period,
+          actual: entry.observation.value,
           unit: "Percent change from preceding period",
           sourceName: "U.S. Bureau of Economic Analysis (BEA)",
           sourceUrl: "https://apps.bea.gov/api/data/",
           sourceTier: "TIER_1_OFFICIAL",
-          sourceObservationId: `NIPA:T20807:${lineCode}:${row.timePeriod}`,
+          sourceObservationId: `NIPA:T20807:${lineCode}:${entry.observation.timePeriod}`,
           sourceReleaseDate: null,
           sourceReleaseDateVerified: false,
           retrievedAt: pce.retrievedAt,
-          previous: index > 0 ? rows[index - 1].value : null,
+          previous: index > 0 ? normalized[index - 1].observation.value : null,
         });
       });
     }
 
-    const gdpRows = gdp.observations
+    const normalizedGdp = gdp.observations
+      .filter((observation) => observation.lineCode === BEA_GDP_GROWTH_LINE_CODE)
+      .map((observation) => ({
+        observation,
+        period: normalizeBeaQuarter(observation.timePeriod),
+      }))
       .filter(
-        (observation) =>
-          observation.lineCode === BEA_GDP_GROWTH_LINE_CODE &&
-          /^\d{4}:Q[1-4]$/.test(observation.timePeriod)
+        (entry): entry is {
+          observation: (typeof gdp.observations)[number];
+          period: string;
+        } => Boolean(entry.period)
       )
-      .sort((a, b) => a.timePeriod.localeCompare(b.timePeriod));
+      .sort((a, b) => a.period.localeCompare(b.period));
 
-    gdpRows.forEach((row, index) => {
+    normalizedGdp.forEach((entry, index) => {
       observations.push({
         indicator: "GDP_GROWTH_RATE",
-        periodCovered: row.timePeriod,
-        actual: row.value,
+        periodCovered: entry.period,
+        actual: entry.observation.value,
         unit: "Percent change at seasonally adjusted annual rate",
         sourceName: "U.S. Bureau of Economic Analysis (BEA)",
         sourceUrl: "https://apps.bea.gov/api/data/",
         sourceTier: "TIER_1_OFFICIAL",
-        sourceObservationId: `NIPA:T10101:${BEA_GDP_GROWTH_LINE_CODE}:${row.timePeriod}`,
+        sourceObservationId: `NIPA:T10101:${BEA_GDP_GROWTH_LINE_CODE}:${entry.observation.timePeriod}`,
         sourceReleaseDate: null,
         sourceReleaseDateVerified: false,
         retrievedAt: gdp.retrievedAt,
-        previous: index > 0 ? gdpRows[index - 1].value : null,
+        previous: index > 0 ? normalizedGdp[index - 1].observation.value : null,
       });
     });
 
