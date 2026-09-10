@@ -77,16 +77,16 @@ export async function fetchFedFundsPilot(): Promise<FedFundsPilotResult> {
  */
 export function parseH15MonthlyPreview(html: string): FedFundsObservation[] {
   const text = html
-    .replace(/<script[\\s\\S]*?<\\/script>/gi, " ")
-    .replace(/<style[\\s\\S]*?<\\/style>/gi, " ")
+    .replace(/<script[\s\S]*?<\/script>/gi, " ")
+    .replace(/<style[\s\S]*?<\/style>/gi, " ")
     .replace(/<[^>]+>/g, " ")
     .replace(/&nbsp;/gi, " ")
     .replace(/&amp;/gi, "&")
-    .replace(/\\s+/g, " ")
+    .replace(/\s+/g, " ")
     .trim();
 
   const observations: FedFundsObservation[] = [];
-  const pattern = /(?<period>\\d{4}-\\d{2})\\s+(?<value>\\d+(?:\\.\\d+)?)/g;
+  const pattern = /(?<period>\d{4}-\d{2})\s+(?<value>\d+(?:\.\d+)?)/g;
 
   for (const match of text.matchAll(pattern)) {
     const period = match.groups?.period;
