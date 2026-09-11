@@ -1,26 +1,9 @@
 /**
  * LAYER 6 — RISK ENVIRONMENT ASSESSMENT ENGINE
  *
- * Implements the Risk Environment section of
- * docs/methodology_fundamental_scoring.md and the Step 7 specification
- * EXACTLY. Deterministic only — no AI, no invented indicators, no new data
- * sources. Pure function: takes already-fetched VIX history as input, same
- * architectural pattern as inflation.ts/employment.ts/growth.ts/
- * monetary-policy.ts/market-pricing.ts.
- *
- * VIX (FRED VIXCLS, CBOE data distributed through FRED) is the ONLY
- * risk-environment indicator available this milestone. Equity data, credit
- * spreads, market breadth, put/call ratios, other volatility indices, and
- * any AI-derived risk signal are explicitly NOT used. This engine honestly
- * states that the full risk environment is not yet available rather than
- * pretending VIX alone represents global risk sentiment.
- *
- * IMPORTANT: this engine's output is CONTEXTUAL ONLY. It is intentionally
- * NOT mechanically converted into a USD bullish/bearish read anywhere in
- * this file, and it must not be folded into the Overall USD Fundamental
- * Condition — the USD can behave differently across risk regimes depending
- * on relative monetary policy, global growth, liquidity, and capital
- * flows, so that relationship is not hardcoded here.
+ * Deterministic VIX-only contextual assessment. Risk Environment is NOT a
+ * USD directional category and is NOT mechanically included in the Overall
+ * USD Fundamental Condition.
  */
 
 import type {
@@ -32,7 +15,6 @@ import type {
 } from "@/types/assessment";
 import type { DataSourceRef } from "@/types/economic-data";
 
-/** Minimal shape this engine needs from a stored release row (newest-first arrays, matching getIndicatorHistory's ordering). */
 export interface RiskEnvironmentHistoryRow {
   actual: number | null;
   previous: number | null;
@@ -48,12 +30,7 @@ export interface RiskEnvironmentEngineInput {
   vix: RiskEnvironmentHistoryRow[];
 }
 
-/**
- * MARKET CONVENTION BANDS — not official CBOE/Fed thresholds. Widely used
- * across trading-desk and financial-media commentary, but no single
- * official body defines them; kept as named, adjustable constants rather
- * than embedded magic numbers.
- */
+/** Market-convention bands, explicitly provisional rather than official thresholds. */
 const VIX_LOW_THRESHOLD = 15;
 const VIX_NORMAL_UPPER_THRESHOLD = 20;
 const VIX_ELEVATED_UPPER_THRESHOLD = 30;
@@ -67,8 +44,7 @@ function toSourceRef(row: RiskEnvironmentHistoryRow): DataSourceRef {
   };
 }
 
-/** Only real releases — defensively excludes forecast placeholder rows (actual: null) that can share this table. */
-function realReleasesOnly(rows: RiskEnvironmentHistoryRow[]): RiskEnvironmentHistoryRow[] {
+function realObservationsOnly(rows: RiskEnvironmentHistoryRow[]): RiskEnvironmentHistoryRow[] {
   return rows.filter((r) => r.actual !== null);
 }
 
@@ -76,28 +52,36 @@ function round(n: number): number {
   return Math.round(n * 1000) / 1000;
 }
 
-/** Change over `releasesBack` releases, falling back to whatever shorter span is actually available rather than inventing missing history. */
+/** Compare the latest observation with an earlier available observation; never invent missing history. */
 function changeOverAvailableSpan(
   rows: RiskEnvironmentHistoryRow[],
-  preferredReleasesBack: number
-): { change: number | null; releasesSpanned: number } {
-  if (rows.length > preferredReleasesBack) {
-    const past = rows[preferredReleasesBack].actual;
+  preferredObservationsBack: number
+): { change: number | null; observationsSpanned: number } {
+  if (rows.length > preferredObservationsBack) {
+    const past = rows[preferredObservationsBack].actual;
     if (past !== null) {
-      return { change: round((rows[0].actual as number) - past), releasesSpanned: preferredReleasesBack };
+      return {
+        change: round((rows[0].actual as number) - past),
+        observationsSpanned: preferredObservationsBack,
+      };
     }
   }
   if (rows.length > 1) {
     const availableBack = rows.length - 1;
     const past = rows[availableBack].actual;
     if (past !== null) {
-      return { change: round((rows[0].actual as number) - past), releasesSpanned: availableBack };
+      return {
+        change: round((rows[0].actual as number) - past),
+        observationsSpanned: availableBack,
+      };
     }
   }
-  return { change: null, releasesSpanned: 0 };
+  return { change: null, observationsSpanned: 0 };
 }
 
-function classifyVixLevel(vix: number): "Low volatility" | "Normal" | "Elevated risk aversion" | "High stress" {
+function classifyVixLevel(
+  vix: number
+): "Low volatility" | "Normal" | "Elevated risk aversion" | "High stress" {
   if (vix < VIX_LOW_THRESHOLD) return "Low volatility";
   if (vix < VIX_NORMAL_UPPER_THRESHOLD) return "Normal";
   if (vix < VIX_ELEVATED_UPPER_THRESHOLD) return "Elevated risk aversion";
@@ -122,11 +106,10 @@ export function generateRiskEnvironmentAssessment(
     "Broader cross-asset risk conditions are therefore incomplete — this assessment does not represent the full risk environment.",
   ];
 
-  const real = realReleasesOnly(input.vix);
+  const real = realObservationsOnly(input.vix);
 
-  // ================= FACT + missing-data handling =================
   if (real.length === 0) {
-    dataLimitations.push("VIX (VIXCLS): no releases stored yet.");
+    dataLimitations.push("VIX (VIXCLS): no observations stored yet.");
     return {
       category: "Risk Environment",
       asOf,
@@ -149,13 +132,13 @@ export function generateRiskEnvironmentAssessment(
     source: toSourceRef(latest),
   });
 
-  // ================= CALCULATIONS =================
-  const { change, releasesSpanned } = changeOverAvailableSpan(real, PREFERRED_TREND_SPAN);
+  const { change, observationsSpanned } = changeOverAvailableSpan(real, PREFERRED_TREND_SPAN);
   calculations.push({
-    label: `VIX: change over last ${releasesSpanned || PREFERRED_TREND_SPAN} release(s)`,
-    formula: `latest.actual - value_${releasesSpanned || PREFERRED_TREND_SPAN}_releases_ago`,
+    label: `VIX: change over last ${observationsSpanned || PREFERRED_TREND_SPAN} observation(s)`,
+    formula: `latest.actual - value_${observationsSpanned || PREFERRED_TREND_SPAN}_observations_ago`,
     result: change,
-    unavailableReason: change === null ? `Need at least 2 stored releases; have ${real.length}.` : undefined,
+    unavailableReason:
+      change === null ? `Need at least 2 stored observations; have ${real.length}.` : undefined,
   });
 
   const level = classifyVixLevel(latest.actual as number);
@@ -165,32 +148,26 @@ export function generateRiskEnvironmentAssessment(
     result: latest.actual,
   });
 
-  // ================= INTERPRETATIONS =================
   interpretations.push({
     label: "VIX level classification",
-    rule: `Market-convention bands (NOT official CBOE/Fed thresholds — widely used across trading-desk and financial-media commentary, kept as adjustable constants): <${VIX_LOW_THRESHOLD}=Low volatility, ${VIX_LOW_THRESHOLD}–${VIX_NORMAL_UPPER_THRESHOLD}=Normal, ${VIX_NORMAL_UPPER_THRESHOLD}–${VIX_ELEVATED_UPPER_THRESHOLD}=Elevated risk aversion, >${VIX_ELEVATED_UPPER_THRESHOLD}=High stress.`,
+    rule: `Market-convention bands (NOT official CBOE/Fed thresholds): <${VIX_LOW_THRESHOLD}=Low volatility, ${VIX_LOW_THRESHOLD}–${VIX_NORMAL_UPPER_THRESHOLD}=Normal, ${VIX_NORMAL_UPPER_THRESHOLD}–${VIX_ELEVATED_UPPER_THRESHOLD}=Elevated risk aversion, >${VIX_ELEVATED_UPPER_THRESHOLD}=High stress. These bands are provisional and adjustable.`,
     result: level,
     isProvisionalThreshold: true,
   });
-  evidence.push(`VIX = ${latest.actual} → ${level} (market-convention band, not an official threshold).`);
+  evidence.push(`VIX = ${latest.actual} → ${level} (provisional market-convention band, not an official threshold).`);
 
   const trendDirection = change === null ? "insufficient" : change > 0 ? "rising" : change < 0 ? "falling" : "flat";
   if (trendDirection !== "insufficient") {
     interpretations.push({
       label: "VIX trend",
-      rule: "Mechanical reading of VIX's own recent change: rising, falling, or flat over the available span.",
+      rule: "Mechanical reading of VIX's own recent change: rising, falling, or flat over the available observation span.",
       result: `VIX ${trendDirection}`,
     });
-    evidence.push(`VIX ${trendDirection} over the last ${releasesSpanned} release(s) (${change! >= 0 ? "+" : ""}${change}).`);
+    evidence.push(`VIX ${trendDirection} over the last ${observationsSpanned} observation(s) (${change! >= 0 ? "+" : ""}${change}).`);
   } else {
     dataLimitations.push("VIX trend unavailable: insufficient history.");
   }
 
-  // ================= ASSESSMENT =================
-  // Risk-On: VIX Low and/or falling. Risk-Off: VIX High/Elevated and/or
-  // rising. Neutral: VIX in the Normal range with no clear directional
-  // signal. No numeric score, no averaging — a direct rule read off the
-  // level classification and trend direction only.
   let assessment: RiskEnvironmentAssessment["assessment"];
   let assessmentReason: string;
 
@@ -220,21 +197,14 @@ export function generateRiskEnvironmentAssessment(
 
   interpretations.push({
     label: "Overall Risk Environment assessment",
-    rule: "Risk-On if VIX is Low and/or falling. Risk-Off if VIX is Elevated/High-stress and/or rising. Neutral if VIX is in the Normal range with no clear direction. No numeric score is computed and nothing is averaged. This does NOT claim VIX alone fully represents global risk sentiment — see data limitations.",
+    rule: "Risk-On if VIX is Low and/or falling. Risk-Off if VIX is Elevated/High-stress and/or rising. Neutral if VIX is in the Normal range with no clear direction. No numeric score is computed and nothing is averaged. This is a contextual VIX-only read, not a complete global risk-sentiment model.",
     result: `${assessment} — ${assessmentReason}`,
   });
 
-  // ================= EXPLICIT NON-CONVERSION NOTE =================
-  // This engine deliberately does NOT translate its Risk-On/Risk-Off
-  // result into a USD bullish/bearish read. That conversion is not
-  // performed here, and this assessment is not fed into the Overall USD
-  // Fundamental Condition mechanically — see file header.
   evidence.push(
-    "This assessment is contextual only. It is not automatically converted into a USD bullish/bearish read, and it is not mechanically included in the Overall USD Fundamental Condition — the USD's relationship with risk sentiment depends on relative monetary policy, global growth, liquidity, and capital flows, which are not modeled here."
+    "Risk Environment is contextual only. It is not automatically converted into a USD bullish/bearish read and is not mechanically included in the Overall USD Fundamental Condition."
   );
 
-  // ================= CONFIDENCE =================
-  // Capped at Low — VIX is the only risk indicator currently available.
   const confidence: ConfidenceLevel = "Low";
 
   return {
