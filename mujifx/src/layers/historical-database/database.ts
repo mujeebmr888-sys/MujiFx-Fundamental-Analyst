@@ -13,9 +13,13 @@ import type { ForecastResult } from "@/layers/forecast-engine/forecast";
 import type { AnalystAssessment } from "@/types/economic-data";
 
 /**
- * Saves a normalized data point. Uses upsert on (indicator, period_covered)
- * so re-running the pipeline for the same period updates the row instead of
- * creating a duplicate — important because forecasts get revised.
+ * Saves a normalized data point.
+ *
+ * Legacy/FRED ingestion must never overwrite an already-ingested authoritative
+ * observation for the same indicator + period. The authoritative writer is
+ * allowed to replace legacy rows, but the reverse direction is blocked here.
+ * This protects source precedence while the remaining indicators are migrated
+ * from legacy transport to their official source adapters.
  *
  * Uses the ADMIN client (service_role key) because writes are intentionally
  * blocked for the public/anon key by Row Level Security — see docs/schema.sql.
@@ -23,6 +27,23 @@ import type { AnalystAssessment } from "@/types/economic-data";
  * never from a client component.
  */
 export async function saveDataPoint(row: EconomicDataRow) {
+  const { data: existing, error: lookupError } = await supabaseAdmin
+    .from("economic_data_points")
+    .select("id, data_origin")
+    .eq("indicator", row.indicator)
+    .eq("period_covered", row.period_covered)
+    .maybeSingle();
+
+  if (lookupError) {
+    throw new Error(
+      `Failed to check existing ${row.indicator} observation: ${lookupError.message}`
+    );
+  }
+
+  if (existing?.data_origin?.startsWith("authoritative_")) {
+    return [existing];
+  }
+
   const { data, error } = await supabaseAdmin
     .from("economic_data_points")
     .upsert(row, { onConflict: "indicator,period_covered" })
