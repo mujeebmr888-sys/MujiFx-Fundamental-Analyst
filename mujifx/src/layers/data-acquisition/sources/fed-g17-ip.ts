@@ -35,7 +35,10 @@ export async function fetchFedG17IndustrialProduction(
   }
 
   const response = await fetch(FED_G17_IP_TEXT_URL, {
-    headers: { Accept: "text/plain,*/*" },
+    headers: {
+      Accept: "text/plain,*/*",
+      "User-Agent": "MUJIFX Fundamental Analyst/1.0",
+    },
     cache: "no-store",
   });
 
@@ -48,24 +51,24 @@ export async function fetchFedG17IndustrialProduction(
 
   for (const rawLine of text.split(/\r?\n/)) {
     const line = rawLine.trim();
-    if (!line || line.startsWith("#")) continue;
+    if (!line || line.startsWith("#") || line.startsWith("B50001:")) continue;
 
-    const fields = line.split(/\s+/);
-    if (fields.length < 3 || fields[0] !== "B50001") continue;
+    const fields = line.split(/\s+/).map((field) => field.replace(/^\"|\"$/g, ""));
+    if (fields.length < 14 || fields[0] !== "B50001") continue;
 
     const year = Number(fields[1]);
     if (!Number.isInteger(year)) continue;
 
+    if (
+      (startYear !== undefined && year < startYear) ||
+      (endYear !== undefined && year > endYear)
+    ) {
+      continue;
+    }
+
     for (let month = 1; month <= 12; month += 1) {
       const value = parseNumber(fields[month + 1] ?? "");
       if (value === null) continue;
-
-      if (
-        (startYear !== undefined && year < startYear) ||
-        (endYear !== undefined && year > endYear)
-      ) {
-        continue;
-      }
 
       observations.push({
         period: `${year}-${String(month).padStart(2, "0")}`,
