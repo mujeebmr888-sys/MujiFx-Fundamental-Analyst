@@ -33,6 +33,14 @@ export interface AuthoritativeIngestionResult {
   status: "success" | "partial";
 }
 
+function normalizePeriodCovered(periodCovered: string): string {
+  const normalized = periodCovered.trim();
+  if (/^\d{4}-\d{2}$/.test(normalized)) {
+    return `${normalized}-01`;
+  }
+  return normalized;
+}
+
 function validateObservation(observation: AuthoritativeObservation): void {
   if (!observation.periodCovered) {
     throw new Error(`Missing periodCovered for ${observation.indicator}.`);
@@ -51,22 +59,24 @@ function validateObservation(observation: AuthoritativeObservation): void {
 }
 
 /**
- * Writes one official-source observation. The existing legacy release_date
- * field is retained for compatibility and is intentionally set to the
- * observation period date only when it is already required by the schema;
- * authoritative release metadata lives in source_release_date.
+ * Writes one official-source observation. Monthly YYYY-MM periods are
+ * normalized to the canonical YYYY-MM-01 format used by the historical data
+ * table, preventing duplicate rows between legacy and authoritative sources.
  */
 export async function writeAuthoritativeObservation(
   observation: AuthoritativeObservation
 ) {
   validateObservation(observation);
 
-  const observationDate = `${observation.periodCovered}-01`;
+  const periodCovered = normalizePeriodCovered(observation.periodCovered);
+  const observationDate = /^\d{4}-\d{2}-\d{2}$/.test(periodCovered)
+    ? periodCovered
+    : `${periodCovered}-01`;
 
   const row = {
     indicator: observation.indicator,
     release_date: observation.sourceReleaseDate ?? observationDate,
-    period_covered: observation.periodCovered,
+    period_covered: periodCovered,
     previous: observation.previous ?? null,
     consensus_forecast: null,
     mujifx_estimate: null,
