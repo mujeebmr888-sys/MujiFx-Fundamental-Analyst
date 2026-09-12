@@ -16,7 +16,7 @@ export interface CensusRetailSalesResult {
   retrievedAt: string;
 }
 
-type CensusApiRow = [string, string, string, string, string];
+type CensusApiRow = [string, string, string, string, string, string];
 
 function parseNumber(value: string): number | null {
   const normalized = value.trim();
