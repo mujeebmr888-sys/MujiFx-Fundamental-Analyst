@@ -1,8 +1,9 @@
-const CENSUS_MRTS_TOTAL_ADJUSTED_URL =
-  "https://www.census.gov/retail/marts/www/adv44X72.txt";
+const CENSUS_MRTS_API_URL =
+  "https://api.census.gov/data/timeseries/eits/mrts";
 
 export const CENSUS_MRTS_CATEGORY_CODE = "44X72";
-export const CENSUS_MRTS_SERIES_ID = "MRTS/44X72/SALES_MONTHLY_ADJUSTED";
+export const CENSUS_MRTS_DATA_TYPE_CODE = "SM";
+export const CENSUS_MRTS_SERIES_ID = "MRTS/44X72/SM/SEASONALLY_ADJUSTED";
 
 export interface CensusRetailSalesObservation {
   period: string;
@@ -15,11 +16,52 @@ export interface CensusRetailSalesResult {
   retrievedAt: string;
 }
 
+type CensusApiRow = [string, string, string, string, string];
+
 function parseNumber(value: string): number | null {
   const normalized = value.trim();
   if (!normalized || normalized === "NA" || normalized === "(S)") return null;
   const parsed = Number(normalized);
   return Number.isFinite(parsed) ? parsed : null;
+}
+
+async function fetchCensusYear(year: number, apiKey: string): Promise<CensusApiRow[]> {
+  const params = new URLSearchParams({
+    get: "data_type_code,time_slot_id,seasonally_adj,category_code,cell_value,error_data",
+    category_code: CENSUS_MRTS_CATEGORY_CODE,
+    data_type_code: CENSUS_MRTS_DATA_TYPE_CODE,
+    seasonally_adj: "yes",
+    time: String(year),
+    key: apiKey,
+  });
+
+  const response = await fetch(`${CENSUS_MRTS_API_URL}?${params.toString()}`, {
+    headers: {
+      Accept: "application/json",
+      "User-Agent": "MUJIFX Fundamental Analyst/1.0",
+    },
+    cache: "no-store",
+  });
+
+  if (!response.ok) {
+    const body = await response.text().catch(() => "");
+    throw new Error(
+      `U.S. Census MRTS API request failed for ${year}: HTTP ${response.status}${
+        body ? ` - ${body.slice(0, 300)}` : ""
+      }`
+    );
+  }
+
+  const payload: unknown = await response.json();
+  if (!Array.isArray(payload) || payload.length < 2) {
+    throw new Error(`U.S. Census MRTS API returned no usable rows for ${year}.`);
+  }
+
+  const rows = payload.slice(1) as unknown[];
+  return rows.filter(
+    (row): row is CensusApiRow =>
+      Array.isArray(row) && row.length >= 6 && row.every((value) => typeof value === "string")
+  );
 }
 
 export async function fetchCensusRetailSales(
@@ -36,47 +78,32 @@ export async function fetchCensusRetailSales(
     throw new Error("Census retail sales startYear cannot exceed endYear.");
   }
 
-  const response = await fetch(CENSUS_MRTS_TOTAL_ADJUSTED_URL, {
-    headers: {
-      Accept: "text/plain,*/*",
-      "User-Agent": "MUJIFX Fundamental Analyst/1.0",
-    },
-    cache: "no-store",
-  });
-
-  if (!response.ok) {
-    throw new Error(`U.S. Census MRTS request failed: HTTP ${response.status}`);
+  const apiKey = process.env.CENSUS_API_KEY;
+  if (!apiKey) {
+    throw new Error("CENSUS_API_KEY is not configured on the server.");
   }
 
-  const text = await response.text();
-  const lines = text.split(/\r?\n/).map((line) => line.trim());
-  const headerIndex = lines.findIndex((line) =>
-    /^YEAR\s+JAN\s+FEB\s+MAR\s+APR\s+MAY\s+JUN\s+JUL\s+AUG\s+SEP\s+OCT\s+NOV\s+DEC$/i.test(line)
-  );
-
-  if (headerIndex < 0) {
-    throw new Error("U.S. Census MRTS response is missing the monthly sales header.");
-  }
-
+  const resolvedStartYear = startYear ?? new Date().getUTCFullYear();
+  const resolvedEndYear = endYear ?? resolvedStartYear;
   const observations: CensusRetailSalesObservation[] = [];
 
-  for (const line of lines.slice(headerIndex + 1)) {
-    if (!line || /^SEASONAL FACTORS$/i.test(line)) break;
+  for (let year = resolvedStartYear; year <= resolvedEndYear; year += 1) {
+    const rows = await fetchCensusYear(year, apiKey);
 
-    const fields = line.split(/\s+/);
-    if (fields.length !== 13 || !/^\d{4}$/.test(fields[0])) continue;
+    for (const row of rows) {
+      const [, timeSlotId, seasonallyAdjusted, categoryCode, cellValue] = row;
+      const value = parseNumber(cellValue);
 
-    const year = Number(fields[0]);
-    if (
-      (startYear !== undefined && year < startYear) ||
-      (endYear !== undefined && year > endYear)
-    ) {
-      continue;
-    }
+      if (
+        seasonallyAdjusted.toLowerCase() !== "yes" ||
+        categoryCode !== CENSUS_MRTS_CATEGORY_CODE ||
+        value === null
+      ) {
+        continue;
+      }
 
-    for (let month = 1; month <= 12; month += 1) {
-      const value = parseNumber(fields[month]);
-      if (value === null) continue;
+      const month = Number(timeSlotId);
+      if (!Number.isInteger(month) || month < 1 || month > 12) continue;
 
       observations.push({
         period: `${year}-${String(month).padStart(2, "0")}`,
@@ -85,15 +112,17 @@ export async function fetchCensusRetailSales(
     }
   }
 
-  if (observations.length === 0) {
-    throw new Error("U.S. Census MRTS total retail sales returned no usable observations.");
-  }
+  const uniqueObservations = Array.from(
+    new Map(observations.map((item) => [item.period, item])).values()
+  ).sort((a, b) => a.period.localeCompare(b.period));
 
-  observations.sort((a, b) => a.period.localeCompare(b.period));
+  if (uniqueObservations.length === 0) {
+    throw new Error("U.S. Census MRTS returned no usable seasonally adjusted retail sales observations.");
+  }
 
   return {
     seriesId: CENSUS_MRTS_SERIES_ID,
-    observations,
+    observations: uniqueObservations,
     retrievedAt: new Date().toISOString(),
   };
 }
