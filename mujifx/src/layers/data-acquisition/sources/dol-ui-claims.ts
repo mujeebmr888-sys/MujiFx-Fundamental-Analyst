@@ -26,13 +26,13 @@ function extractTag(block: string, tag: string): string | null {
 
 function parseUsDate(value: string | null): string | null {
   if (!value) return null;
-  const match = value.match(/^(\\d{2})\\/(\\d{2})\\/(\\d{4})$/);
+  const match = value.match(/^(\d{2})\/(\d{2})\/(\d{4})$/);
   if (!match) return null;
   return `${match[3]}-${match[1]}-${match[2]}`;
 }
 
 function extractWeekBlocks(xml: string): string[] {
-  return [...xml.matchAll(/<week(?:\\s[^>]*)?>[\\s\\S]*?<\\/week>/gi)].map((match) => match[0]);
+  return [...xml.matchAll(/<week(?:\s[^>]*)?>[\s\S]*?<\/week>/gi)].map((match) => match[0]);
 }
 
 export async function fetchDolUiClaims(startYear: number, endYear: number): Promise<DolUiClaimsResult> {
