@@ -243,4 +243,3 @@ export async function fetchCensusRetailSales(
     retrievedAt: new Date().toISOString(),
   };
 }
-```
