@@ -9,9 +9,10 @@ import type { AuthoritativeObservation } from "@/layers/data-acquisition/authori
 export const dynamic = "force-dynamic";
 
 export async function GET() {
+  const endYear = new Date().getUTCFullYear();
+  const startYear = endYear - 1;
+
   try {
-    const endYear = new Date().getUTCFullYear();
-    const startYear = endYear - 1;
     const retailSales = await fetchCensusRetailSales(startYear, endYear);
 
     const observations: AuthoritativeObservation[] = retailSales.observations.map((item) => ({
@@ -44,12 +45,18 @@ export async function GET() {
     });
   } catch (error) {
     console.error("Authoritative U.S. Census retail sales sync failed:", error);
+
+    const message = error instanceof Error ? error.message : String(error);
+    const safeDiagnostic = message.slice(0, 500);
+
     return NextResponse.json(
       {
         success: false,
         stage: "authoritative-census-retail-sales-ingestion",
+        range: { startYear, endYear },
+        diagnostic: safeDiagnostic,
         reason:
-          "Could not complete the authoritative U.S. Census retail sales sync. Check server logs.",
+          "Could not complete the authoritative U.S. Census retail sales sync. The diagnostic field identifies the failing step without exposing the API key.",
       },
       { status: 500 }
     );
