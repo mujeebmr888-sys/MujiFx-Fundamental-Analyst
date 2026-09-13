@@ -18,11 +18,10 @@ export interface CensusRetailSalesResult {
 
 interface CensusApiRow {
   dataTypeCode: string;
-  timeSlotId: string;
+  timeSlotDate: string;
   seasonallyAdjusted: string;
   categoryCode: string;
   cellValue: string;
-  errorData: string;
 }
 
 function parseNumber(value: string): number | null {
@@ -42,14 +41,18 @@ function readField(
   field: string
 ): string | null {
   const index = headers.findIndex(
-    (header) => header.toLowerCase() === field.toLowerCase()
+    (header) => header.trim().toLowerCase() === field.toLowerCase()
   );
 
   if (index < 0) return null;
 
   const value = row[index];
-
   return typeof value === "string" ? value : null;
+}
+
+function isSeasonallyAdjusted(value: string): boolean {
+  const normalized = value.trim().toLowerCase();
+  return normalized === "yes" || normalized === "y" || normalized === "true";
 }
 
 async function fetchCensusYear(
@@ -57,10 +60,9 @@ async function fetchCensusYear(
   apiKey: string
 ): Promise<CensusApiRow[]> {
   const params = new URLSearchParams({
-    get: "cell_value,data_type_code,time_slot_id,error_data,category_code,seasonally_adj",
+    get: "data_type_code,time_slot_id,time_slot_date,seasonally_adj,category_code,cell_value",
     category_code: CENSUS_MRTS_CATEGORY_CODE,
     data_type_code: CENSUS_MRTS_DATA_TYPE_CODE,
-    seasonally_adj: "yes",
     time: String(year),
     key: apiKey,
   });
@@ -104,37 +106,33 @@ async function fetchCensusYear(
 
   const headers = headerRow as string[];
   const rows = payload.slice(1) as unknown[];
-
   const parsedRows: CensusApiRow[] = [];
 
   for (const row of rows) {
     if (!Array.isArray(row)) continue;
 
     const dataTypeCode = readField(row, headers, "data_type_code");
-    const timeSlotId = readField(row, headers, "time_slot_id");
+    const timeSlotDate = readField(row, headers, "time_slot_date");
     const seasonallyAdjusted = readField(row, headers, "seasonally_adj");
     const categoryCode = readField(row, headers, "category_code");
     const cellValue = readField(row, headers, "cell_value");
-    const errorData = readField(row, headers, "error_data");
 
     if (
       dataTypeCode === null ||
-      timeSlotId === null ||
+      timeSlotDate === null ||
       seasonallyAdjusted === null ||
       categoryCode === null ||
-      cellValue === null ||
-      errorData === null
+      cellValue === null
     ) {
       continue;
     }
 
     parsedRows.push({
       dataTypeCode,
-      timeSlotId,
+      timeSlotDate,
       seasonallyAdjusted,
       categoryCode,
       cellValue,
-      errorData,
     });
   }
 
@@ -179,57 +177,49 @@ export async function fetchCensusRetailSales(
     throw new Error("CENSUS_API_KEY is not configured on the server.");
   }
 
-  const resolvedStartYear =
-    startYear ?? new Date().getUTCFullYear();
-
-  const resolvedEndYear =
-    endYear ?? resolvedStartYear;
-
+  const resolvedStartYear = startYear ?? new Date().getUTCFullYear();
+  const resolvedEndYear = endYear ?? resolvedStartYear;
   const observations: CensusRetailSalesObservation[] = [];
 
-  for (
-    let year = resolvedStartYear;
-    year <= resolvedEndYear;
-    year += 1
-  ) {
+  for (let year = resolvedStartYear; year <= resolvedEndYear; year += 1) {
     const rows = await fetchCensusYear(year, apiKey);
 
     for (const row of rows) {
       const value = parseNumber(row.cellValue);
+      const periodMatch = row.timeSlotDate.trim().match(/^(\d{4})-(\d{2})/);
 
       if (
-        row.seasonallyAdjusted.toLowerCase() !== "yes" ||
-        row.categoryCode !== CENSUS_MRTS_CATEGORY_CODE ||
         row.dataTypeCode !== CENSUS_MRTS_DATA_TYPE_CODE ||
-        value === null
+        row.categoryCode !== CENSUS_MRTS_CATEGORY_CODE ||
+        !isSeasonallyAdjusted(row.seasonallyAdjusted) ||
+        value === null ||
+        periodMatch === null
       ) {
         continue;
       }
 
-      const month = Number(row.timeSlotId);
+      const periodYear = Number(periodMatch[1]);
+      const periodMonth = Number(periodMatch[2]);
 
       if (
-        !Number.isInteger(month) ||
-        month < 1 ||
-        month > 12
+        periodYear !== year ||
+        !Number.isInteger(periodMonth) ||
+        periodMonth < 1 ||
+        periodMonth > 12
       ) {
         continue;
       }
 
       observations.push({
-        period: `${year}-${String(month).padStart(2, "0")}`,
+        period: `${periodYear}-${String(periodMonth).padStart(2, "0")}`,
         value,
       });
     }
   }
 
   const uniqueObservations = Array.from(
-    new Map(
-      observations.map((item) => [item.period, item])
-    ).values()
-  ).sort((a, b) =>
-    a.period.localeCompare(b.period)
-  );
+    new Map(observations.map((item) => [item.period, item])).values()
+  ).sort((a, b) => a.period.localeCompare(b.period));
 
   if (uniqueObservations.length === 0) {
     throw new Error(
