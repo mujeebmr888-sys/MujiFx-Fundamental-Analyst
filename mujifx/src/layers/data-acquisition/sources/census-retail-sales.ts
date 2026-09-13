@@ -1,4 +1,3 @@
-```ts
 const CENSUS_MRTS_API_URL =
   "https://api.census.gov/data/timeseries/eits/mrts";
 
