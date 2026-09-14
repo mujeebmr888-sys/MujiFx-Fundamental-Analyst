@@ -15,13 +15,14 @@ import type { AuthoritativeObservation } from "@/layers/data-acquisition/authori
 export const dynamic = "force-dynamic";
 
 export async function GET() {
+  const endYear = new Date().getUTCFullYear();
+  const startYear = endYear - 1;
+
   try {
-    const endYear = new Date().getUTCFullYear();
-    const startYear = endYear - 1;
-    const [ppi, jolts] = await Promise.all([
-      fetchBlsPpi(startYear, endYear),
-      fetchBlsJolts(startYear, endYear),
-    ]);
+    // Fetch sequentially so a failing source is unambiguous in logs/errors and
+    // one slow BLS request cannot mask the other source's result.
+    const ppi = await fetchBlsPpi(startYear, endYear);
+    const jolts = await fetchBlsJolts(startYear, endYear);
 
     const observations: AuthoritativeObservation[] = [];
 
@@ -79,12 +80,16 @@ export async function GET() {
       results,
     });
   } catch (error) {
-    console.error("Authoritative BLS P1 sync failed:", error);
+    const message = error instanceof Error ? error.message : String(error);
+    console.error("Authoritative BLS P1 sync failed:", message);
+
     return NextResponse.json(
       {
         success: false,
         stage: "authoritative-bls-p1-ingestion",
-        reason: "Could not complete the authoritative BLS P1 sync. Check server logs.",
+        range: { startYear, endYear },
+        reason: "Could not complete the authoritative BLS P1 sync.",
+        error: message,
       },
       { status: 500 }
     );
