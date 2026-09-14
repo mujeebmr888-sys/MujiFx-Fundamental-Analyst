@@ -125,10 +125,10 @@ function normalizeBeaQuarter(timePeriod: string): string | null {
 }
 
 export async function GET() {
-  try {
-    const endYear = new Date().getUTCFullYear();
-    const startYear = endYear - 1;
+  const endYear = new Date().getUTCFullYear();
+  const startYear = endYear - 1;
 
+  try {
     const [cpi, coreCpi, employment, pce, gdp, fedFunds] = await Promise.all([
       fetchBlsCpiPilot(startYear, endYear),
       fetchBlsCoreCpiPilot(startYear, endYear),
@@ -257,12 +257,14 @@ export async function GET() {
       results,
     });
   } catch (error) {
-    console.error("Authoritative P0 sync failed:", error);
+    const message = error instanceof Error ? error.message : String(error);
+    console.error("Authoritative P0 sync failed:", message);
     return NextResponse.json(
       {
         success: false,
         stage: "authoritative-p0-ingestion",
-        reason: "Could not complete the authoritative P0 sync. Check server logs.",
+        reason: "Could not complete the authoritative P0 sync.",
+        error: message,
       },
       { status: 500 }
     );
