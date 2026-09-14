@@ -42,7 +42,7 @@ function normalizeObservations(
   return observations
     .filter(
       (item) =>
-        /^\\d{4}$/.test(item.year) &&
+        /^\d{4}$/.test(item.year) &&
         Number(item.year) >= startYear &&
         Number(item.year) <= endYear &&
         /^M(0[1-9]|1[0-2])$/.test(item.period) &&
@@ -126,11 +126,10 @@ async function fetchJson(
 }
 
 /**
- * BLS documents GET as the single-series signature. We use it first because
- * it is the smallest request for one JOLTS series. If the GET path fails or
- * returns no observations in the requested window, retry with the documented
- * POST signature and an explicit year range. This keeps the adapter resilient
- * without downloading the large JOLTS flat file from a serverless function.
+ * BLS documents GET as the single-series signature and POST as the
+ * year-bounded signature. Use GET first, then POST as a transport fallback.
+ * No flat-file download is used here because this adapter only needs one
+ * seasonally adjusted JOLTS series and should remain serverless-friendly.
  */
 async function fetchBlsJoltsApi(
   startYear: number,
