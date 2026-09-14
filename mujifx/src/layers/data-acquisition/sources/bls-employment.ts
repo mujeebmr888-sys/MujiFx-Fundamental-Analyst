@@ -3,13 +3,6 @@
  *
  * Isolated, read-only source adapter for authoritative BLS employment
  * indicators used by the MUJIFX Employment category.
- *
- * This pilot intentionally does NOT write to the production database,
- * does NOT assign releaseDate from observation period, and does NOT replace
- * the existing FRED transport yet.
- *
- * If configured, the registered BLS API key is read server-side from the
- * Vercel environment variable named BLS.
  */
 
 const BLS_API_URL = "https://api.bls.gov/publicAPI/v2/timeseries/data/";
@@ -68,6 +61,9 @@ function isEmploymentSeries(value: string): value is BlsEmploymentIndicator {
 /**
  * Fetch authoritative BLS monthly observations for the three core
  * Employment-category P0 indicators.
+ *
+ * BLS documents multiple-series requests through POST. Using POST here
+ * avoids relying on an undocumented multi-series GET query shape.
  */
 export async function fetchBlsEmploymentPilot(
   startYear: number,
@@ -81,21 +77,24 @@ export async function fetchBlsEmploymentPilot(
     throw new Error("BLS employment pilot startYear cannot be after endYear.");
   }
 
-  const url = new URL(BLS_API_URL);
-  url.searchParams.set(
-    "seriesid",
-    Object.values(BLS_EMPLOYMENT_SERIES).join(",")
-  );
-  url.searchParams.set("startyear", String(startYear));
-  url.searchParams.set("endyear", String(endYear));
-
   const apiKey = process.env[BLS_API_KEY_ENV]?.trim();
+  const body: Record<string, unknown> = {
+    seriesid: Object.values(BLS_EMPLOYMENT_SERIES),
+    startyear: String(startYear),
+    endyear: String(endYear),
+  };
+
   if (apiKey) {
-    url.searchParams.set("registrationkey", apiKey);
+    body.registrationkey = apiKey;
   }
 
-  const res = await fetch(url.toString(), {
-    headers: { Accept: "application/json" },
+  const res = await fetch(BLS_API_URL, {
+    method: "POST",
+    headers: {
+      Accept: "application/json",
+      "Content-Type": "application/json",
+    },
+    body: JSON.stringify(body),
     cache: "no-store",
   });
 
@@ -129,9 +128,7 @@ export async function fetchBlsEmploymentPilot(
 
   for (const series of returnedSeries) {
     const seriesId = series.seriesID;
-    if (!seriesId || !isEmploymentSeries(seriesId)) {
-      continue;
-    }
+    if (!seriesId || !isEmploymentSeries(seriesId)) continue;
 
     for (const item of series.data ?? []) {
       const year = item.year;
@@ -148,9 +145,7 @@ export async function fetchBlsEmploymentPilot(
       }
 
       const value = Number(item.value);
-      if (!Number.isFinite(value)) {
-        continue;
-      }
+      if (!Number.isFinite(value)) continue;
 
       observations.push({
         seriesId,
