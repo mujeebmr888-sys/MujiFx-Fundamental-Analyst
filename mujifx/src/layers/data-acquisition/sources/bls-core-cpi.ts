@@ -1,9 +1,8 @@
 /**
- * STEP 13J — BLS CORE CPI SOURCE PILOT
+ * Authoritative BLS Core CPI source adapter.
  *
- * Isolated, read-only source adapter for the authoritative BLS Core CPI
- * series. The adapter returns source observations only; database persistence
- * is handled by the shared authoritative writer.
+ * Source observations only; database persistence is handled by the shared
+ * authoritative writer.
  */
 
 const BLS_API_URL = "https://api.bls.gov/publicAPI/v2/timeseries/data/";
@@ -48,39 +47,42 @@ interface BlsApiResponse {
  * Fetches BLS CPI-U U.S. city average, all items less food and energy,
  * seasonally adjusted.
  *
- * Important: BLS API observations contain observation periods, not the
- * official publication timestamp. Therefore this function returns only
- * source observations and never maps observation date to releaseDate.
+ * BLS documents POST for requests specifying a year range. Using that
+ * documented signature avoids relying on unsupported GET query parameters.
  */
 export async function fetchBlsCoreCpiPilot(
   startYear: number,
   endYear: number
 ): Promise<BlsCoreCpiPilotResult> {
   if (!Number.isInteger(startYear) || !Number.isInteger(endYear)) {
-    throw new Error("BLS Core CPI pilot requires integer startYear and endYear.");
+    throw new Error("BLS Core CPI requires integer startYear and endYear.");
   }
 
   if (startYear > endYear) {
-    throw new Error("BLS Core CPI pilot startYear cannot be after endYear.");
+    throw new Error("BLS Core CPI startYear cannot be after endYear.");
   }
 
-  const url = new URL(BLS_API_URL);
-  url.searchParams.set("seriesid", BLS_CORE_CPI_SERIES_ID);
-  url.searchParams.set("startyear", String(startYear));
-  url.searchParams.set("endyear", String(endYear));
+  const body: Record<string, unknown> = {
+    seriesid: [BLS_CORE_CPI_SERIES_ID],
+    startyear: String(startYear),
+    endyear: String(endYear),
+  };
 
-  const apiKey = process.env[BLS_API_KEY_ENV];
-  if (apiKey) {
-    url.searchParams.set("registrationkey", apiKey);
-  }
+  const apiKey = process.env[BLS_API_KEY_ENV]?.trim();
+  if (apiKey) body.registrationkey = apiKey;
 
-  const res = await fetch(url.toString(), {
-    headers: { Accept: "application/json" },
+  const res = await fetch(BLS_API_URL, {
+    method: "POST",
+    headers: {
+      Accept: "application/json",
+      "Content-Type": "application/json",
+    },
+    body: JSON.stringify(body),
     cache: "no-store",
   });
 
   if (!res.ok) {
-    throw new Error(`BLS API returned HTTP ${res.status}.`);
+    throw new Error(`BLS Core CPI API returned HTTP ${res.status}.`);
   }
 
   const data = (await res.json()) as BlsApiResponse;
@@ -119,6 +121,12 @@ export async function fetchBlsCoreCpiPilot(
       })),
     }))
     .filter((item) => Number.isFinite(item.value));
+
+  if (observations.length === 0) {
+    throw new Error(
+      `BLS Core CPI API returned no monthly observations for ${startYear}-${endYear}.`
+    );
+  }
 
   return {
     seriesId: BLS_CORE_CPI_SERIES_ID,
