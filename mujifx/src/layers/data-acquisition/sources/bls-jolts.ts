@@ -42,7 +42,7 @@ function normalizeObservations(
   return observations
     .filter(
       (item) =>
-        /^\d{4}$/.test(item.year) &&
+        /^\\d{4}$/.test(item.year) &&
         Number(item.year) >= startYear &&
         Number(item.year) <= endYear &&
         /^M(0[1-9]|1[0-2])$/.test(item.period) &&
@@ -55,35 +55,11 @@ function normalizeObservations(
     });
 }
 
-/**
- * BLS documents GET as the single-series signature. It returns the recent
- * history for one series, which is sufficient for the two-year ingestion
- * window used by this route and avoids downloading the multi-megabyte JOLTS
- * flat file from a serverless function.
- */
-async function fetchBlsJoltsApi(
+function parseSeries(
+  data: BlsApiResponse,
   startYear: number,
   endYear: number
-): Promise<BlsJoltsObservation[]> {
-  const response = await fetch(
-    `${BLS_API_URL}${BLS_JOLTS_SERIES_ID}`,
-    {
-      headers: { Accept: "application/json" },
-      cache: "no-store",
-    }
-  );
-
-  if (!response.ok) {
-    throw new Error(`BLS JOLTS API returned HTTP ${response.status}.`);
-  }
-
-  const data = (await response.json()) as BlsApiResponse;
-  if (data.status !== "REQUEST_SUCCEEDED") {
-    throw new Error(
-      `BLS JOLTS request failed: ${data.message?.join(" ") || "Unknown BLS API error."}`
-    );
-  }
-
+): BlsJoltsObservation[] {
   const series = data.Results?.series?.find(
     (item) => item.seriesID === BLS_JOLTS_SERIES_ID
   );
@@ -112,6 +88,106 @@ async function fetchBlsJoltsApi(
     .filter((item) => Number.isFinite(item.value));
 
   return normalizeObservations(observations, startYear, endYear);
+}
+
+function buildApiError(prefix: string, data: BlsApiResponse): Error {
+  return new Error(
+    `${prefix}: ${data.message?.join(" ") || "Unknown BLS API error."}`
+  );
+}
+
+async function fetchJson(
+  url: string,
+  init: RequestInit,
+  label: string
+): Promise<BlsApiResponse> {
+  const response = await fetch(url, { ...init, cache: "no-store" });
+  const raw = await response.text();
+
+  let data: BlsApiResponse;
+  try {
+    data = JSON.parse(raw) as BlsApiResponse;
+  } catch {
+    throw new Error(
+      `${label} returned HTTP ${response.status} with a non-JSON response.`
+    );
+  }
+
+  if (!response.ok) {
+    throw new Error(
+      `${label} returned HTTP ${response.status}: ${data.message?.join(" ") || raw.slice(0, 300)}`
+    );
+  }
+  if (data.status !== "REQUEST_SUCCEEDED") {
+    throw buildApiError(`${label} failed`, data);
+  }
+
+  return data;
+}
+
+/**
+ * BLS documents GET as the single-series signature. We use it first because
+ * it is the smallest request for one JOLTS series. If the GET path fails or
+ * returns no observations in the requested window, retry with the documented
+ * POST signature and an explicit year range. This keeps the adapter resilient
+ * without downloading the large JOLTS flat file from a serverless function.
+ */
+async function fetchBlsJoltsApi(
+  startYear: number,
+  endYear: number
+): Promise<BlsJoltsObservation[]> {
+  const apiKey = process.env[BLS_API_KEY_ENV]?.trim();
+  const getUrl = new URL(`${BLS_API_URL}${BLS_JOLTS_SERIES_ID}`);
+  if (apiKey) getUrl.searchParams.set("registrationkey", apiKey);
+
+  let getError: Error | null = null;
+  try {
+    const data = await fetchJson(
+      getUrl.toString(),
+      { headers: { Accept: "application/json" } },
+      "BLS JOLTS GET"
+    );
+    const observations = parseSeries(data, startYear, endYear);
+    if (observations.length > 0) return observations;
+    getError = new Error(
+      `BLS JOLTS GET returned no monthly observations for ${startYear}-${endYear}.`
+    );
+  } catch (error) {
+    getError = error instanceof Error ? error : new Error(String(error));
+  }
+
+  const body: Record<string, unknown> = {
+    seriesid: [BLS_JOLTS_SERIES_ID],
+    startyear: String(startYear),
+    endyear: String(endYear),
+  };
+  if (apiKey) body.registrationkey = apiKey;
+
+  try {
+    const data = await fetchJson(
+      BLS_API_URL,
+      {
+        method: "POST",
+        headers: {
+          Accept: "application/json",
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify(body),
+      },
+      "BLS JOLTS POST"
+    );
+    const observations = parseSeries(data, startYear, endYear);
+    if (observations.length > 0) return observations;
+
+    throw new Error(
+      `BLS JOLTS POST returned no monthly observations for ${startYear}-${endYear}.`
+    );
+  } catch (postError) {
+    const postMessage = postError instanceof Error ? postError.message : String(postError);
+    throw new Error(
+      `JOLTS acquisition failed. GET: ${getError?.message ?? "unknown"} POST: ${postMessage}`
+    );
+  }
 }
 
 export async function fetchBlsJolts(
