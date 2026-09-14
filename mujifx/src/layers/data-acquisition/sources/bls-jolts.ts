@@ -1,5 +1,5 @@
 const BLS_API_URL = "https://api.bls.gov/publicAPI/v2/timeseries/data/";
-const BLS_API_KEY_ENV = "BLS";
+const BLS_JOLTS_FLAT_FILE_URL = "https://download.bls.gov/pub/time.series/JT/jt.data.2.JobOpenings";
 
 // Current BLS seasonally adjusted Total Nonfarm, Job Openings, Total U.S. series.
 export const BLS_JOLTS_SERIES_ID = "JTS00000000JOL";
@@ -34,6 +34,21 @@ interface BlsApiResponse {
   };
 }
 
+const PERIOD_NAMES: Record<string, string> = {
+  M01: "January",
+  M02: "February",
+  M03: "March",
+  M04: "April",
+  M05: "May",
+  M06: "June",
+  M07: "July",
+  M08: "August",
+  M09: "September",
+  M10: "October",
+  M11: "November",
+  M12: "December",
+};
+
 function normalizeObservations(
   observations: BlsJoltsObservation[],
   startYear: number,
@@ -55,7 +70,7 @@ function normalizeObservations(
     });
 }
 
-function parseSeries(
+function parseApiSeries(
   data: BlsApiResponse,
   startYear: number,
   endYear: number
@@ -78,7 +93,7 @@ function parseSeries(
     .map((item) => ({
       year: item.year as string,
       period: item.period as string,
-      periodName: item.periodName ?? "",
+      periodName: item.periodName ?? PERIOD_NAMES[item.period as string] ?? "",
       value: Number(item.value),
       footnotes: (item.footnotes ?? []).map((footnote) => ({
         code: footnote.code ?? null,
@@ -90,101 +105,141 @@ function parseSeries(
   return normalizeObservations(observations, startYear, endYear);
 }
 
-function buildApiError(prefix: string, data: BlsApiResponse): Error {
-  return new Error(
-    `${prefix}: ${data.message?.join(" ") || "Unknown BLS API error."}`
-  );
-}
-
-async function fetchJson(
-  url: string,
-  init: RequestInit,
-  label: string
-): Promise<BlsApiResponse> {
-  const response = await fetch(url, { ...init, cache: "no-store" });
-  const raw = await response.text();
-
-  let data: BlsApiResponse;
-  try {
-    data = JSON.parse(raw) as BlsApiResponse;
-  } catch {
-    throw new Error(
-      `${label} returned HTTP ${response.status} with a non-JSON response.`
-    );
-  }
-
-  if (!response.ok) {
-    throw new Error(
-      `${label} returned HTTP ${response.status}: ${data.message?.join(" ") || raw.slice(0, 300)}`
-    );
-  }
-  if (data.status !== "REQUEST_SUCCEEDED") {
-    throw buildApiError(`${label} failed`, data);
-  }
-
-  return data;
-}
-
-/**
- * BLS documents GET as the single-series signature and POST as the
- * year-bounded signature. Use GET first, then POST as a transport fallback.
- * No flat-file download is used here because this adapter only needs one
- * seasonally adjusted JOLTS series and should remain serverless-friendly.
- */
 async function fetchBlsJoltsApi(
   startYear: number,
   endYear: number
 ): Promise<BlsJoltsObservation[]> {
-  const apiKey = process.env[BLS_API_KEY_ENV]?.trim();
-  const getUrl = new URL(`${BLS_API_URL}${BLS_JOLTS_SERIES_ID}`);
-  if (apiKey) getUrl.searchParams.set("registrationkey", apiKey);
+  const response = await fetch(`${BLS_API_URL}${BLS_JOLTS_SERIES_ID}`, {
+    headers: { Accept: "application/json" },
+    cache: "no-store",
+  });
 
-  let getError: Error | null = null;
-  try {
-    const data = await fetchJson(
-      getUrl.toString(),
-      { headers: { Accept: "application/json" } },
-      "BLS JOLTS GET"
-    );
-    const observations = parseSeries(data, startYear, endYear);
-    if (observations.length > 0) return observations;
-    getError = new Error(
-      `BLS JOLTS GET returned no monthly observations for ${startYear}-${endYear}.`
-    );
-  } catch (error) {
-    getError = error instanceof Error ? error : new Error(String(error));
+  if (!response.ok) {
+    throw new Error(`BLS JOLTS API returned HTTP ${response.status}.`);
   }
 
-  const body: Record<string, unknown> = {
-    seriesid: [BLS_JOLTS_SERIES_ID],
-    startyear: String(startYear),
-    endyear: String(endYear),
+  const data = (await response.json()) as BlsApiResponse;
+  if (data.status !== "REQUEST_SUCCEEDED") {
+    throw new Error(
+      `BLS JOLTS API request failed: ${data.message?.join(" ") || "Unknown BLS API error."}`
+    );
+  }
+
+  return parseApiSeries(data, startYear, endYear);
+}
+
+async function fetchBlsJoltsFlatFile(
+  startYear: number,
+  endYear: number
+): Promise<BlsJoltsObservation[]> {
+  const response = await fetch(BLS_JOLTS_FLAT_FILE_URL, {
+    headers: {
+      Accept: "text/plain",
+      "User-Agent": "MUJIFX Fundamental Analyst",
+    },
+    cache: "no-store",
+  });
+
+  if (!response.ok || !response.body) {
+    throw new Error(
+      `BLS JOLTS flat file returned HTTP ${response.status} or no readable response body.`
+    );
+  }
+
+  const reader = response.body.getReader();
+  const decoder = new TextDecoder();
+  let buffer = "";
+  let headerSeen = false;
+  const observations: BlsJoltsObservation[] = [];
+
+  const processLine = (rawLine: string) => {
+    const line = rawLine.replace(/\r$/, "");
+    if (!line.trim()) return;
+
+    if (!headerSeen) {
+      headerSeen = true;
+      return;
+    }
+
+    const fields = line.split("\t").map((field) => field.trim());
+    const [seriesId, year, period, value, footnoteCodes] = fields;
+
+    if (seriesId !== BLS_JOLTS_SERIES_ID) return;
+    if (!/^\d{4}$/.test(year ?? "")) return;
+    if (!/^M(0[1-9]|1[0-2])$/.test(period ?? "")) return;
+    if (Number(year) < startYear || Number(year) > endYear) return;
+    if (value == null || value === "." || value === "") return;
+
+    const numericValue = Number(value);
+    if (!Number.isFinite(numericValue)) return;
+
+    observations.push({
+      year,
+      period,
+      periodName: PERIOD_NAMES[period] ?? period,
+      value: numericValue,
+      footnotes: (footnoteCodes ?? "")
+        .split(",")
+        .map((code) => code.trim())
+        .filter(Boolean)
+        .map((code) => ({ code, text: null })),
+    });
   };
-  if (apiKey) body.registrationkey = apiKey;
 
   try {
-    const data = await fetchJson(
-      BLS_API_URL,
-      {
-        method: "POST",
-        headers: {
-          Accept: "application/json",
-          "Content-Type": "application/json",
-        },
-        body: JSON.stringify(body),
-      },
-      "BLS JOLTS POST"
-    );
-    const observations = parseSeries(data, startYear, endYear);
-    if (observations.length > 0) return observations;
+    while (true) {
+      const { value, done } = await reader.read();
+      if (done) break;
 
-    throw new Error(
-      `BLS JOLTS POST returned no monthly observations for ${startYear}-${endYear}.`
+      buffer += decoder.decode(value, { stream: true });
+      const lines = buffer.split("\n");
+      buffer = lines.pop() ?? "";
+      for (const line of lines) processLine(line);
+    }
+
+    buffer += decoder.decode();
+    if (buffer) processLine(buffer);
+  } finally {
+    reader.releaseLock();
+  }
+
+  return normalizeObservations(observations, startYear, endYear);
+}
+
+/**
+ * Primary transport is the official BLS single-series API. If BLS API returns
+ * a successful response with no observations for the requested years, fall
+ * back to the official BLS JOLTS flat file. The flat file is streamed and
+ * filtered line-by-line so the serverless route never loads the 6MB+ file
+ * into memory. No third-party or FRED source is used.
+ */
+async function fetchBlsJoltsOfficial(
+  startYear: number,
+  endYear: number
+): Promise<BlsJoltsObservation[]> {
+  let apiError: Error | null = null;
+
+  try {
+    const observations = await fetchBlsJoltsApi(startYear, endYear);
+    if (observations.length > 0) return observations;
+    apiError = new Error(
+      `BLS JOLTS API returned no monthly observations for ${startYear}-${endYear}.`
     );
-  } catch (postError) {
-    const postMessage = postError instanceof Error ? postError.message : String(postError);
+  } catch (error) {
+    apiError = error instanceof Error ? error : new Error(String(error));
+  }
+
+  try {
+    const observations = await fetchBlsJoltsFlatFile(startYear, endYear);
+    if (observations.length > 0) return observations;
     throw new Error(
-      `JOLTS acquisition failed. GET: ${getError?.message ?? "unknown"} POST: ${postMessage}`
+      `BLS JOLTS flat file returned no monthly observations for ${startYear}-${endYear}.`
+    );
+  } catch (flatFileError) {
+    const flatMessage =
+      flatFileError instanceof Error ? flatFileError.message : String(flatFileError);
+    throw new Error(
+      `JOLTS acquisition failed. API: ${apiError?.message ?? "unknown"} FlatFile: ${flatMessage}`
     );
   }
 }
@@ -200,7 +255,7 @@ export async function fetchBlsJolts(
     throw new Error("BLS JOLTS startYear cannot be after endYear.");
   }
 
-  const observations = await fetchBlsJoltsApi(startYear, endYear);
+  const observations = await fetchBlsJoltsOfficial(startYear, endYear);
 
   if (observations.length === 0) {
     throw new Error(
