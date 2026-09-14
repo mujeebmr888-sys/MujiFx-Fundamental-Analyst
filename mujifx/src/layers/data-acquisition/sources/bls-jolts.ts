@@ -1,7 +1,8 @@
 const BLS_API_URL = "https://api.bls.gov/publicAPI/v2/timeseries/data/";
 const BLS_API_KEY_ENV = "BLS";
 
-export const BLS_JOLTS_SERIES_ID = "JTS000000000000000JOL";
+// Current BLS seasonally adjusted Total Nonfarm, Job Openings, Total U.S. series.
+export const BLS_JOLTS_SERIES_ID = "JTS00000000JOL";
 
 export interface BlsJoltsObservation {
   year: string;
@@ -36,7 +37,10 @@ interface BlsApiResponse {
   };
 }
 
-export async function fetchBlsJolts(startYear: number, endYear: number): Promise<BlsJoltsResult> {
+export async function fetchBlsJolts(
+  startYear: number,
+  endYear: number
+): Promise<BlsJoltsResult> {
   if (!Number.isInteger(startYear) || !Number.isInteger(endYear)) {
     throw new Error("BLS JOLTS requires integer startYear and endYear.");
   }
@@ -63,12 +67,20 @@ export async function fetchBlsJolts(startYear: number, endYear: number): Promise
 
   const data = (await response.json()) as BlsApiResponse;
   if (data.status !== "REQUEST_SUCCEEDED") {
-    throw new Error(`BLS JOLTS request failed: ${data.message?.join(" ") || "Unknown BLS API error."}`);
+    throw new Error(
+      `BLS JOLTS request failed: ${
+        data.message?.join(" ") || "Unknown BLS API error."
+      }`
+    );
   }
 
-  const series = data.Results?.series?.find((item) => item.seriesID === BLS_JOLTS_SERIES_ID);
+  const series = data.Results?.series?.find(
+    (item) => item.seriesID === BLS_JOLTS_SERIES_ID
+  );
   if (!series) {
-    throw new Error(`BLS JOLTS series ${BLS_JOLTS_SERIES_ID} was not returned.`);
+    throw new Error(
+      `BLS JOLTS series ${BLS_JOLTS_SERIES_ID} was not returned.`
+    );
   }
 
   const observations = (series.data ?? [])
