@@ -30,10 +30,7 @@ interface BlsApiResponse {
   status?: string;
   message?: string[];
   Results?: {
-    series?: Array<{
-      seriesID?: string;
-      data?: BlsApiObservation[];
-    }>;
+    series?: Array<{ seriesID?: string; data?: BlsApiObservation[] }>;
   };
 }
 
@@ -48,16 +45,18 @@ export async function fetchBlsJolts(
     throw new Error("BLS JOLTS startYear cannot be after endYear.");
   }
 
-  const url = new URL(BLS_API_URL);
-  url.searchParams.set("seriesid", BLS_JOLTS_SERIES_ID);
-  url.searchParams.set("startyear", String(startYear));
-  url.searchParams.set("endyear", String(endYear));
-
+  const body: Record<string, unknown> = {
+    seriesid: [BLS_JOLTS_SERIES_ID],
+    startyear: String(startYear),
+    endyear: String(endYear),
+  };
   const apiKey = process.env[BLS_API_KEY_ENV]?.trim();
-  if (apiKey) url.searchParams.set("registrationkey", apiKey);
+  if (apiKey) body.registrationkey = apiKey;
 
-  const response = await fetch(url.toString(), {
-    headers: { Accept: "application/json" },
+  const response = await fetch(BLS_API_URL, {
+    method: "POST",
+    headers: { Accept: "application/json", "Content-Type": "application/json" },
+    body: JSON.stringify(body),
     cache: "no-store",
   });
 
@@ -68,9 +67,7 @@ export async function fetchBlsJolts(
   const data = (await response.json()) as BlsApiResponse;
   if (data.status !== "REQUEST_SUCCEEDED") {
     throw new Error(
-      `BLS JOLTS request failed: ${
-        data.message?.join(" ") || "Unknown BLS API error."
-      }`
+      `BLS JOLTS request failed: ${data.message?.join(" ") || "Unknown BLS API error."}`
     );
   }
 
@@ -78,9 +75,7 @@ export async function fetchBlsJolts(
     (item) => item.seriesID === BLS_JOLTS_SERIES_ID
   );
   if (!series) {
-    throw new Error(
-      `BLS JOLTS series ${BLS_JOLTS_SERIES_ID} was not returned.`
-    );
+    throw new Error(`BLS JOLTS series ${BLS_JOLTS_SERIES_ID} was not returned.`);
   }
 
   const observations = (series.data ?? [])
