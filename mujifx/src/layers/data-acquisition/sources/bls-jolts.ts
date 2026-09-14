@@ -1,8 +1,8 @@
 const BLS_API_URL = "https://api.bls.gov/publicAPI/v2/timeseries/data/";
 const BLS_API_KEY_ENV = "BLS";
 
-// Current BLS seasonally adjusted Total Nonfarm, Job Openings, Total U.S. series.
-export const BLS_JOLTS_SERIES_ID = "JTS000000000000000JOL";
+// Official BLS Total Nonfarm, Job Openings, Total U.S., seasonally adjusted.
+export const BLS_JOLTS_SERIES_ID = "JTS00000000JOL";
 
 export interface BlsJoltsObservation {
   year: string;
@@ -109,9 +109,9 @@ function parseApiSeries(
 /**
  * Fetch the official BLS JOLTS Total Nonfarm Job Openings level.
  *
- * BLS documents POST as the supported signature when requesting a specific
- * year range. This avoids the old single-series GET limitation and avoids
- * downloading large JOLTS flat files into a serverless function.
+ * BLS documents POST for a specific year-bounded request. This keeps the
+ * serverless path on the official JSON API and avoids downloading large
+ * JOLTS flat files.
  */
 export async function fetchBlsJoltsApi(
   startYear: number,
