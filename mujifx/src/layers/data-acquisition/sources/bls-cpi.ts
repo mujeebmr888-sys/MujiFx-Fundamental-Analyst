@@ -5,9 +5,7 @@
  * The adapter itself does not write to Supabase; the authoritative ingestion
  * route passes its observations to the shared authoritative writer.
  *
- * If configured, the registered BLS API key is read server-side from the
- * Vercel environment variable named BLS. The public endpoint still works
- * without the key for lower-rate usage.
+ * BLS year-bounded requests use the documented POST API signature.
  */
 
 const BLS_API_URL = "https://api.bls.gov/publicAPI/v2/timeseries/data/";
@@ -48,13 +46,6 @@ interface BlsApiResponse {
   };
 }
 
-/**
- * Fetches BLS CPI-U U.S. city average, all items, seasonally adjusted.
- *
- * Important: BLS API observations contain observation periods, not the
- * official publication timestamp. Therefore this function returns only
- * source observations and never maps observation date to releaseDate.
- */
 export async function fetchBlsCpiPilot(
   startYear: number,
   endYear: number
@@ -62,32 +53,33 @@ export async function fetchBlsCpiPilot(
   if (!Number.isInteger(startYear) || !Number.isInteger(endYear)) {
     throw new Error("BLS CPI pilot requires integer startYear and endYear.");
   }
-
   if (startYear > endYear) {
     throw new Error("BLS CPI pilot startYear cannot be after endYear.");
   }
 
-  const url = new URL(BLS_API_URL);
-  url.searchParams.set("seriesid", BLS_CPI_SERIES_ID);
-  url.searchParams.set("startyear", String(startYear));
-  url.searchParams.set("endyear", String(endYear));
-
   const apiKey = process.env[BLS_API_KEY_ENV]?.trim();
-  if (apiKey) {
-    url.searchParams.set("registrationkey", apiKey);
-  }
+  const body: Record<string, unknown> = {
+    seriesid: [BLS_CPI_SERIES_ID],
+    startyear: String(startYear),
+    endyear: String(endYear),
+  };
+  if (apiKey) body.registrationkey = apiKey;
 
-  const res = await fetch(url.toString(), {
-    headers: { Accept: "application/json" },
+  const res = await fetch(BLS_API_URL, {
+    method: "POST",
+    headers: {
+      Accept: "application/json",
+      "Content-Type": "application/json",
+    },
+    body: JSON.stringify(body),
     cache: "no-store",
   });
 
   if (!res.ok) {
-    throw new Error(`BLS API returned HTTP ${res.status}.`);
+    throw new Error(`BLS CPI API returned HTTP ${res.status}.`);
   }
 
   const data = (await res.json()) as BlsApiResponse;
-
   if (data.status !== "REQUEST_SUCCEEDED") {
     const message = data.message?.join(" ") || "Unknown BLS API error.";
     throw new Error(`BLS CPI request failed: ${message}`);
@@ -96,11 +88,8 @@ export async function fetchBlsCpiPilot(
   const series = data.Results?.series?.find(
     (item) => item.seriesID === BLS_CPI_SERIES_ID
   );
-
   if (!series) {
-    throw new Error(
-      `BLS CPI series ${BLS_CPI_SERIES_ID} was not returned by the API.`
-    );
+    throw new Error(`BLS CPI series ${BLS_CPI_SERIES_ID} was not returned.`);
   }
 
   const observations: BlsMonthlyObservation[] = (series.data ?? [])
