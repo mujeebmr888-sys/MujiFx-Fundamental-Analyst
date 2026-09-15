@@ -245,7 +245,6 @@ export async function POST(request: Request) {
         sourceReleaseDate: null,
         sourceReleaseDateVerified: false,
         retrievedAt: gdp.retrievedAt,
-        sourceReleaseDateVerified: false,
         previous: index > 0 ? normalizedGdp[index - 1].observation.value : null,
       });
     });
