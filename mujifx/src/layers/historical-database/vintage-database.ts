@@ -20,9 +20,16 @@ export interface VintageObservationAsOf {
   source_name: string;
   source_url: string;
   source_tier: string;
+  source_version: string | null;
 }
 
 export async function saveVintageObservation(vintage: VintageObservation) {
+  if (!vintage.sourceVersion?.trim()) {
+    throw new Error(
+      `Refusing to save vintage ${vintage.indicator}/${vintage.observationDate}: sourceVersion is required.`
+    );
+  }
+
   const { data, error } = await supabaseAdmin.rpc(
     "save_indicator_observation_vintage",
     {
@@ -35,6 +42,7 @@ export async function saveVintageObservation(vintage: VintageObservation) {
       p_source_name: vintage.sourceName,
       p_source_url: vintage.sourceUrl,
       p_source_tier: vintage.sourceTier,
+      p_source_version: vintage.sourceVersion.trim(),
     }
   );
 
