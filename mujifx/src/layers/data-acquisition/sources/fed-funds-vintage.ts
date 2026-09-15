@@ -2,16 +2,15 @@
  * FEDERAL RESERVE H.15 EFFECTIVE FEDERAL FUNDS PUBLISHED-SNAPSHOT ADAPTER
  *
  * The live H.15 feed is authoritative for current observations, but a
- * point-in-time vintage must be tied to an exact published H.15 release.
- * This adapter accepts rows parsed from one official release snapshot and
- * records the release publication date as the version evidence.
+ * point-in-time vintage must be tied to an exact published H.15 snapshot.
  */
 
 import type { IndicatorId } from "@/types/economic-data";
 import {
-  blsPublishedSnapshotProvenance,
-  type BlsPublishedSnapshotDescriptor,
-} from "@/layers/data-acquisition/sources/bls-snapshot-provenance";
+  federalReservePublishedSnapshotProvenance,
+  type FederalReservePublishedSnapshotDescriptor,
+} from "@/layers/data-acquisition/sources/federal-reserve-snapshot-provenance";
+import { assertFiniteSnapshotRows } from "@/layers/data-acquisition/sources/published-snapshot-validation";
 import { writeAuthoritativeVintage } from "@/layers/historical-database/authoritative-vintage-writer";
 
 export interface FedFundsSnapshotRow {
@@ -27,7 +26,7 @@ export interface WriteFedFundsSnapshotInput {
   sourceUrl: string;
   sourceTier: "TIER_1_OFFICIAL";
   retrievedAt: string;
-  snapshot: BlsPublishedSnapshotDescriptor;
+  snapshot: FederalReservePublishedSnapshotDescriptor;
   rows: FedFundsSnapshotRow[];
 }
 
@@ -40,9 +39,7 @@ function assertMonth(value: string): void {
 export async function writeFedFundsSnapshot(
   input: WriteFedFundsSnapshotInput
 ): Promise<unknown[]> {
-  if (!input.rows.length) {
-    throw new Error("Federal Reserve funds snapshot contains no observations.");
-  }
+  assertFiniteSnapshotRows(input.rows, "Federal Reserve funds");
 
   if (input.indicator !== "FED_FUNDS_RATE" || input.seriesId !== "RIFSPFF_N.M") {
     throw new Error(
@@ -50,22 +47,17 @@ export async function writeFedFundsSnapshot(
     );
   }
 
-  const provenance = blsPublishedSnapshotProvenance(input.snapshot);
+  const provenance = federalReservePublishedSnapshotProvenance(input.snapshot);
   const results: unknown[] = [];
 
   for (const row of input.rows) {
     assertMonth(row.observationDate);
-    if (!Number.isFinite(row.value)) {
-      throw new Error(
-        `Federal Reserve funds snapshot contains a non-finite value for ${row.observationDate}.`
-      );
-    }
 
     results.push(
       await writeAuthoritativeVintage(
         {
           indicator: input.indicator,
-          observationDate: row.observationDate,
+          observationDate: row.observationDate.trim(),
           value: row.value,
           isMissing: row.isMissing ?? false,
           retrievedAt: input.retrievedAt,
