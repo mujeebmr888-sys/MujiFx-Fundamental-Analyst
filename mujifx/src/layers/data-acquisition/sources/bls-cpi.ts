@@ -8,6 +8,11 @@
  * BLS year-bounded requests use the documented POST API signature.
  */
 
+import {
+  blsApiRetrievalProvenance,
+  type AuthoritativeVersionProvenance,
+} from "@/layers/data-acquisition/authoritative-version";
+
 const BLS_API_URL = "https://api.bls.gov/publicAPI/v2/timeseries/data/";
 const BLS_API_KEY_ENV = "BLS";
 
@@ -25,6 +30,7 @@ export interface BlsCpiPilotResult {
   seriesId: typeof BLS_CPI_SERIES_ID;
   observations: BlsMonthlyObservation[];
   retrievedAt: string;
+  versionProvenance: AuthoritativeVersionProvenance;
 }
 
 interface BlsApiObservation {
@@ -116,6 +122,7 @@ export async function fetchBlsCpiPilot(
     seriesId: BLS_CPI_SERIES_ID,
     observations,
     retrievedAt: new Date().toISOString(),
+    versionProvenance: blsApiRetrievalProvenance(),
   };
 }
 
