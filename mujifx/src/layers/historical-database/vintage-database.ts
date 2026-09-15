@@ -8,6 +8,20 @@
 import { supabaseAdmin } from "@/config/supabase-admin";
 import type { VintageObservation } from "@/layers/data-acquisition/sources/fred-vintage";
 
+export interface VintageObservationAsOf {
+  id: number;
+  indicator: string;
+  observation_date: string;
+  value: number | null;
+  is_missing: boolean;
+  realtime_start: string;
+  realtime_end: string | null;
+  retrieved_at: string;
+  source_name: string;
+  source_url: string;
+  source_tier: string;
+}
+
 export async function saveVintageObservation(vintage: VintageObservation) {
   const { data, error } = await supabaseAdmin.rpc(
     "save_indicator_observation_vintage",
@@ -31,4 +45,33 @@ export async function saveVintageObservation(vintage: VintageObservation) {
   }
 
   return data;
+}
+
+/**
+ * Returns the single observation version that was officially available on
+ * the requested as-of date. This is the core read path for point-in-time
+ * analysis and deliberately does not fall back to the current/latest value.
+ */
+export async function getVintageObservationAsOf(
+  indicator: string,
+  observationDate: string,
+  asOfDate: string
+): Promise<VintageObservationAsOf | null> {
+  const { data, error } = await supabaseAdmin.rpc(
+    "get_indicator_vintage_as_of",
+    {
+      p_indicator: indicator,
+      p_observation_date: observationDate,
+      p_as_of_date: asOfDate,
+    }
+  );
+
+  if (error) {
+    throw new Error(
+      `Failed to read vintage ${indicator}/${observationDate} as of ${asOfDate}: ${error.message}`
+    );
+  }
+
+  const rows = (data ?? []) as VintageObservationAsOf[];
+  return rows[0] ?? null;
 }
