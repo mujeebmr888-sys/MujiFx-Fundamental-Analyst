@@ -12,7 +12,7 @@ import {
   blsPublishedSnapshotProvenance,
   type BlsPublishedSnapshotDescriptor,
 } from "@/layers/data-acquisition/sources/bls-snapshot-provenance";
-import { parseBlsCpiSnapshotRows } from "@/layers/data-acquisition/sources/bls-cpi-snapshot-parser";
+import { parseBlsMonthlySnapshotRows } from "@/layers/data-acquisition/sources/bls-monthly-snapshot-parser";
 import { writeAuthoritativeVintage } from "@/layers/historical-database/authoritative-vintage-writer";
 
 export interface BlsNfpSnapshotRow {
@@ -33,14 +33,6 @@ export interface WriteBlsNfpSnapshotInput {
   rows: BlsNfpSnapshotRow[];
 }
 
-/**
- * Persist rows from one exact BLS CES published vintage snapshot.
- *
- * The snapshot publication date is the point-in-time availability marker.
- * A live BLS API retrieval cannot be passed through this adapter as vintage
- * evidence because the API exposes current observations rather than an
- * immutable historical release version.
- */
 export async function writeBlsNfpSnapshot(
   input: WriteBlsNfpSnapshotInput
 ): Promise<unknown[]> {
@@ -55,9 +47,8 @@ export async function writeBlsNfpSnapshot(
   }
 
   const provenance = blsPublishedSnapshotProvenance(input.snapshot);
+  const parsedRows = parseBlsMonthlySnapshotRows(input.rows);
   const results: unknown[] = [];
-
-  const parsedRows = parseBlsCpiSnapshotRows(input.rows);
 
   for (const row of parsedRows) {
     results.push(
@@ -66,7 +57,7 @@ export async function writeBlsNfpSnapshot(
           indicator: input.indicator,
           observationDate: row.observationDate,
           value: row.value,
-          isMissing: row.isMissing ?? false,
+          isMissing: row.isMissing,
           retrievedAt: input.retrievedAt,
           sourceName: input.sourceName,
           sourceUrl: input.sourceUrl,
