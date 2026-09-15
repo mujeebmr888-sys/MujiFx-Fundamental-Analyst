@@ -1,7 +1,7 @@
 /**
  * STEP 13M — AUTHORITATIVE P0 SYNC
  *
- * Single manual server-side entry point for the approved P0 source contracts:
+ * Single protected server-side entry point for the approved P0 source contracts:
  * BLS CPI/Core CPI + Employment, BEA PCE/Core PCE + GDP growth, and the
  * Federal Reserve H.15 effective federal funds rate.
  *
@@ -40,6 +40,19 @@ import { writeAuthoritativeBatch } from "@/layers/data-acquisition/authoritative
 import type { AuthoritativeObservation } from "@/layers/data-acquisition/authoritative-writer";
 
 export const dynamic = "force-dynamic";
+
+function isAuthorized(request: Request): boolean {
+  const cronSecret = process.env.CRON_SECRET;
+  if (!cronSecret) return false;
+
+  const headerSecret = request.headers.get("x-cron-secret");
+  const authorization = request.headers.get("authorization");
+  const bearerSecret = authorization?.startsWith("Bearer ")
+    ? authorization.slice("Bearer ".length)
+    : null;
+
+  return headerSecret === cronSecret || bearerSecret === cronSecret;
+}
 
 function mapBlsIndexRows(
   indicator: "CPI" | "CORE_CPI",
@@ -124,7 +137,21 @@ function normalizeBeaQuarter(timePeriod: string): string | null {
   return `${match[1]}-${monthByQuarter[match[2] as keyof typeof monthByQuarter]}`;
 }
 
-export async function GET() {
+export async function POST(request: Request) {
+  if (!process.env.CRON_SECRET) {
+    return NextResponse.json(
+      { success: false, reason: "CRON_SECRET is not configured." },
+      { status: 503 }
+    );
+  }
+
+  if (!isAuthorized(request)) {
+    return NextResponse.json(
+      { success: false, reason: "Unauthorized." },
+      { status: 401 }
+    );
+  }
+
   const endYear = new Date().getUTCFullYear();
   const startYear = endYear - 1;
 
@@ -218,6 +245,7 @@ export async function GET() {
         sourceReleaseDate: null,
         sourceReleaseDateVerified: false,
         retrievedAt: gdp.retrievedAt,
+        sourceReleaseDateVerified: false,
         previous: index > 0 ? normalizedGdp[index - 1].observation.value : null,
       });
     });
@@ -239,6 +267,7 @@ export async function GET() {
         sourceReleaseDate: null,
         sourceReleaseDateVerified: false,
         retrievedAt: fedFunds.retrievedAt,
+        sourceReleaseDateVerified: false,
         previous: index > 0 ? fedRows[index - 1].value : null,
       });
     });
