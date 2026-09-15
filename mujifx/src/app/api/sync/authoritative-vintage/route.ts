@@ -1,20 +1,12 @@
-/**
- * AUTHORITATIVE VERSIONED VINTAGE INGESTION
- *
- * Protected bridge for exact published snapshots from approved official
- * sources. This endpoint never fetches a live API and never turns retrieval
- * time or a release-calendar date into a vintage by itself.
- *
- * IMPORTANT: only sources with explicit vintage-eligible provenance may use
- * this endpoint. At present that is the BLS CES NFP vintage table. Other
- * published snapshots remain available through their source adapters for
- * future work, but are intentionally not exposed as vintage ingestion paths
- * until their source-specific version semantics are proven.
- */
 import { NextResponse } from "next/server";
 import { writeBlsNfpSnapshot } from "@/layers/data-acquisition/sources/bls-nfp-vintage";
+import {
+  BLS_NFP_VINTAGE_URL,
+  parseBlsNfpVintageWorkbook,
+} from "@/layers/data-acquisition/sources/bls-nfp-vintage-parser";
 
 export const dynamic = "force-dynamic";
+export const maxDuration = 60;
 
 const MAX_ROWS = 5000;
 const BLS_NFP_VINTAGE_PATH = "/web/empsit/cesvin00.xlsx";
@@ -83,11 +75,14 @@ function assertNfpVintageDateSemantics(
     throw new Error(`BLS NFP observationDate must be YYYY-MM: ${observationDate}`);
   }
 
+  const month = Number(observationMatch[2]);
+  if (month < 1 || month > 12) {
+    throw new Error(`BLS NFP observationDate has an invalid month: ${observationDate}`);
+  }
+
   const release = parseIsoDate(releaseDate, "releaseDate");
   const publication = parseIsoDate(publicationDate, "snapshot publicationDate");
-  const observationEnd = new Date(
-    Date.UTC(Number(observationMatch[1]), Number(observationMatch[2]), 0)
-  );
+  const observationEnd = new Date(Date.UTC(Number(observationMatch[1]), month, 0));
 
   if (release <= observationEnd) {
     throw new Error(
@@ -137,6 +132,7 @@ function validateBody(body: unknown): SnapshotBody {
   assertOfficialSnapshotUrl(snapshot.snapshotUrl);
   parseIsoDate(snapshot.publicationDate, "snapshot publicationDate");
 
+  const seen = new Set<string>();
   for (const row of input.rows) {
     if (
       !row ||
@@ -150,18 +146,108 @@ function validateBody(body: unknown): SnapshotBody {
       );
     }
 
-    assertNfpVintageDateSemantics(
-      row.observationDate.trim(),
-      row.releaseDate.trim(),
-      snapshot.publicationDate.trim()
+    const observationDate = row.observationDate.trim();
+    const releaseDate = row.releaseDate.trim();
+    const key = `${observationDate}|${releaseDate}`;
+    if (seen.has(key)) throw new Error(`Duplicate NFP vintage row: ${key}`);
+    seen.add(key);
+
+    assertNfpVintageDateSemantics(observationDate, releaseDate, snapshot.publicationDate.trim());
+  }
+
+  return { kind: "NFP", snapshot, rows: input.rows };
+}
+
+async function fetchBlsSnapshot() {
+  const response = await fetch(BLS_NFP_VINTAGE_URL, {
+    cache: "no-store",
+    headers: { Accept: "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet" },
+    signal: AbortSignal.timeout(45_000),
+  });
+
+  if (!response.ok) {
+    throw new Error(`BLS vintage download failed with HTTP ${response.status}.`);
+  }
+
+  const lastModified = response.headers.get("last-modified");
+  if (!lastModified) {
+    throw new Error("BLS vintage download did not provide Last-Modified provenance.");
+  }
+
+  const publication = new Date(lastModified);
+  if (Number.isNaN(publication.getTime())) {
+    throw new Error(`BLS Last-Modified header is invalid: ${lastModified}`);
+  }
+
+  const publicationDate = publication.toISOString().slice(0, 10);
+  const bytes = await response.arrayBuffer();
+  if (!bytes.byteLength) throw new Error("BLS vintage download was empty.");
+
+  return { bytes, publicationDate };
+}
+
+async function ingestLatestBlsNfpVintage() {
+  const { bytes, publicationDate } = await fetchBlsSnapshot();
+  const releases = parseBlsNfpVintageWorkbook(bytes);
+  const latest = releases[releases.length - 1];
+  if (!latest) throw new Error("BLS vintage workbook contains no release rows.");
+
+  const rows = latest.rows;
+  if (rows.length > MAX_ROWS) {
+    throw new Error(`Latest BLS NFP release contains ${rows.length} rows; limit is ${MAX_ROWS}.`);
+  }
+
+  const snapshot = {
+    snapshotUrl: BLS_NFP_VINTAGE_URL,
+    publicationDate,
+    label: "BLS CES Total Nonfarm Vintage Data",
+  };
+
+  validateBody({ kind: "NFP", snapshot, rows });
+
+  const written = await writeBlsNfpSnapshot({
+    seriesId: "CES0000000001",
+    indicator: "NFP",
+    sourceName: "U.S. Bureau of Labor Statistics (BLS)",
+    sourceUrl: BLS_NFP_VINTAGE_URL,
+    sourceTier: "TIER_1_OFFICIAL",
+    retrievedAt: new Date().toISOString(),
+    snapshot,
+    rows,
+  });
+
+  return {
+    kind: "NFP" as const,
+    releaseDate: latest.releaseDate,
+    snapshot,
+    releasesAvailable: releases.length,
+    rowsReceived: rows.length,
+    rowsWritten: written.length,
+  };
+}
+
+export async function GET(request: Request) {
+  if (!process.env.CRON_SECRET) {
+    return NextResponse.json(
+      { success: false, reason: "CRON_SECRET is not configured." },
+      { status: 503 }
     );
   }
 
-  return {
-    kind: "NFP",
-    snapshot,
-    rows: input.rows,
-  };
+  if (!authorized(request)) {
+    return NextResponse.json({ success: false, reason: "Unauthorized." }, { status: 401 });
+  }
+
+  try {
+    return NextResponse.json({ success: true, ...(await ingestLatestBlsNfpVintage()) });
+  } catch (error) {
+    const message = error instanceof Error ? error.message : String(error);
+    console.error("Automatic BLS NFP vintage ingestion failed:", message);
+    return NextResponse.json(
+      { success: false, stage: "automatic-authoritative-vintage-ingestion", reason: message },
+      { status: 400 }
+    );
+  }
 }
 
 export async function POST(request: Request) {
@@ -173,24 +259,19 @@ export async function POST(request: Request) {
   }
 
   if (!authorized(request)) {
-    return NextResponse.json(
-      { success: false, reason: "Unauthorized." },
-      { status: 401 }
-    );
+    return NextResponse.json({ success: false, reason: "Unauthorized." }, { status: 401 });
   }
 
   try {
     const body = validateBody(await request.json());
-    const retrievedAt = new Date().toISOString();
     const snapshot = body.snapshot;
-
     const written = await writeBlsNfpSnapshot({
       seriesId: "CES0000000001",
       indicator: "NFP",
       sourceName: "U.S. Bureau of Labor Statistics (BLS)",
       sourceUrl: snapshot.snapshotUrl,
       sourceTier: "TIER_1_OFFICIAL",
-      retrievedAt,
+      retrievedAt: new Date().toISOString(),
       snapshot,
       rows: body.rows,
     });
@@ -198,11 +279,7 @@ export async function POST(request: Request) {
     return NextResponse.json({
       success: true,
       kind: body.kind,
-      snapshot: {
-        label: snapshot.label,
-        publicationDate: snapshot.publicationDate,
-        sourceUrl: snapshot.snapshotUrl,
-      },
+      snapshot,
       rowsReceived: body.rows.length,
       rowsWritten: written.length,
     });
@@ -210,11 +287,7 @@ export async function POST(request: Request) {
     const message = error instanceof Error ? error.message : String(error);
     console.error("Authoritative vintage ingestion failed:", message);
     return NextResponse.json(
-      {
-        success: false,
-        stage: "authoritative-vintage-ingestion",
-        reason: message,
-      },
+      { success: false, stage: "authoritative-vintage-ingestion", reason: message },
       { status: 400 }
     );
   }
