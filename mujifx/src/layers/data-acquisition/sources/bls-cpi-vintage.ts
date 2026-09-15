@@ -3,8 +3,8 @@
  *
  * This adapter is deliberately separate from the live BLS API adapter.
  * Callers must supply rows parsed from an official BLS published snapshot
- * (for example, an archived CPI supplemental workbook) together with the
- * snapshot descriptor. Live API rows are not accepted as vintage evidence.
+ * together with the snapshot descriptor. Live API rows are not accepted as
+ * vintage evidence.
  */
 
 import type { IndicatorId } from "@/types/economic-data";
@@ -12,6 +12,7 @@ import {
   blsPublishedSnapshotProvenance,
   type BlsPublishedSnapshotDescriptor,
 } from "@/layers/data-acquisition/sources/bls-snapshot-provenance";
+import { assertFiniteSnapshotRows } from "@/layers/data-acquisition/sources/published-snapshot-validation";
 import { writeAuthoritativeVintage } from "@/layers/historical-database/authoritative-vintage-writer";
 
 export interface BlsCpiSnapshotRow {
@@ -39,14 +40,12 @@ function assertMonth(value: string): void {
 
 /**
  * Persist rows from one exact BLS published snapshot as point-in-time
- * observations. The snapshot publication date becomes realtime_start.
+ * observations. The snapshot publication date is the availability marker.
  */
 export async function writeBlsCpiSnapshot(
   input: WriteBlsCpiSnapshotInput
 ): Promise<unknown[]> {
-  if (!input.rows.length) {
-    throw new Error("BLS CPI snapshot contains no observations.");
-  }
+  assertFiniteSnapshotRows(input.rows, "BLS CPI");
 
   const expectedSeriesId =
     input.indicator === "CPI" ? "CUSR0000SA0" : "CUSR0000SA0L1E";
@@ -61,17 +60,12 @@ export async function writeBlsCpiSnapshot(
 
   for (const row of input.rows) {
     assertMonth(row.observationDate);
-    if (!Number.isFinite(row.value)) {
-      throw new Error(
-        `BLS CPI snapshot contains a non-finite value for ${row.observationDate}.`
-      );
-    }
 
     results.push(
       await writeAuthoritativeVintage(
         {
           indicator: input.indicator,
-          observationDate: row.observationDate,
+          observationDate: row.observationDate.trim(),
           value: row.value,
           isMissing: row.isMissing ?? false,
           retrievedAt: input.retrievedAt,
