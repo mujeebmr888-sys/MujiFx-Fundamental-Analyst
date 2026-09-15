@@ -161,7 +161,12 @@ function validateBody(body: unknown): SnapshotBody {
 async function fetchBlsSnapshot() {
   const response = await fetch(BLS_NFP_VINTAGE_URL, {
     cache: "no-store",
-    headers: { Accept: "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet" },
+    headers: {
+      Accept: "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet, application/octet-stream;q=0.9, */*;q=0.1",
+      "User-Agent": "MujiFx-Fundamental-Analyst/1.0 (BLS public-data ingestion)",
+      Referer: "https://www.bls.gov/",
+      "Accept-Encoding": "identity",
+    },
     signal: AbortSignal.timeout(45_000),
   });
 
