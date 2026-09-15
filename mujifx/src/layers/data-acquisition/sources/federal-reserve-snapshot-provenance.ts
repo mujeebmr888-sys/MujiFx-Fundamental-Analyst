@@ -25,5 +25,6 @@ export function federalReservePublishedSnapshotProvenance(
     snapshotUrl: descriptor.snapshotUrl.trim(),
     availableFrom: descriptor.publicationDate,
     availableUntil: null,
+    vintageEligible: false,
   };
 }
