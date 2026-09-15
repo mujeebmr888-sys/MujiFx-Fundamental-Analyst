@@ -1,17 +1,16 @@
 /**
  * LAYER 2: DATA NORMALIZATION
- * Converts an EconomicDataPoint (already in our common shape from layer 1)
- * into the exact row shape our Supabase table expects.
+ * Converts an EconomicDataPoint into the exact row shape our Supabase table expects.
  *
- * If layer 1 ever adds a second source (e.g. BLS direct, Treasury.gov direct),
- * this file is the ONLY place that needs to know about database column names.
+ * release_date is nullable because authoritative adapters must never fabricate
+ * a release date from an observation period.
  */
 
 import type { EconomicDataPoint } from "@/types/economic-data";
 
 export interface EconomicDataRow {
   indicator: string;
-  release_date: string;
+  release_date: string | null;
   period_covered: string;
   previous: number | null;
   consensus_forecast: number | null;
