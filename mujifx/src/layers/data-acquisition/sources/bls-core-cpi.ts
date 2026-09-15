@@ -5,6 +5,11 @@
  * authoritative writer.
  */
 
+import {
+  blsApiRetrievalProvenance,
+  type AuthoritativeVersionProvenance,
+} from "@/layers/data-acquisition/authoritative-version";
+
 const BLS_API_URL = "https://api.bls.gov/publicAPI/v2/timeseries/data/";
 const BLS_API_KEY_ENV = "BLS";
 
@@ -22,6 +27,7 @@ export interface BlsCoreCpiPilotResult {
   seriesId: typeof BLS_CORE_CPI_SERIES_ID;
   observations: BlsCoreCpiObservation[];
   retrievedAt: string;
+  versionProvenance: AuthoritativeVersionProvenance;
 }
 
 interface BlsApiObservation {
@@ -132,5 +138,6 @@ export async function fetchBlsCoreCpiPilot(
     seriesId: BLS_CORE_CPI_SERIES_ID,
     observations,
     retrievedAt: new Date().toISOString(),
+    versionProvenance: blsApiRetrievalProvenance(),
   };
 }
