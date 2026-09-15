@@ -7,6 +7,7 @@
  * snapshot descriptor. Live API rows are not accepted as vintage evidence.
  */
 
+import type { IndicatorId } from "@/types/economic-data";
 import {
   blsPublishedSnapshotProvenance,
   type BlsPublishedSnapshotDescriptor,
@@ -21,10 +22,10 @@ export interface BlsCpiSnapshotRow {
 
 export interface WriteBlsCpiSnapshotInput {
   seriesId: "CUSR0000SA0" | "CUSR0000SA0L1E";
-  indicator: string;
+  indicator: Extract<IndicatorId, "CPI" | "CORE_CPI">;
   sourceName: string;
   sourceUrl: string;
-  sourceTier: string;
+  sourceTier: "TIER_1_OFFICIAL";
   retrievedAt: string;
   snapshot: BlsPublishedSnapshotDescriptor;
   rows: BlsCpiSnapshotRow[];
@@ -45,6 +46,14 @@ export async function writeBlsCpiSnapshot(
 ): Promise<unknown[]> {
   if (!input.rows.length) {
     throw new Error("BLS CPI snapshot contains no observations.");
+  }
+
+  const expectedSeriesId =
+    input.indicator === "CPI" ? "CUSR0000SA0" : "CUSR0000SA0L1E";
+  if (input.seriesId !== expectedSeriesId) {
+    throw new Error(
+      `BLS CPI series ${input.seriesId} does not match indicator ${input.indicator}.`
+    );
   }
 
   const provenance = blsPublishedSnapshotProvenance(input.snapshot);
