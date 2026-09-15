@@ -1,16 +1,14 @@
 /**
- * STEP 13K — AUTHORITATIVE CPI INGESTION
+ * AUTHORITATIVE CPI INGESTION
  *
- * Manual server-side verification route for the BLS CPI + Core CPI source
- * adapters and the shared authoritative writer.
+ * Server-side ingestion endpoint for official BLS CPI + Core CPI data.
  *
- * Scope is intentionally limited to the two CPI indicators. It does not
- * replace the legacy /api/sync/cpi route, change scoring, or fabricate release
- * dates. BLS API observations provide observation periods; release metadata
- * is therefore left unverified unless a later source contract establishes it.
+ * Security:
+ * This endpoint writes to Supabase and therefore requires CRON_SECRET.
+ * Send it in the Authorization header as: Bearer <CRON_SECRET>
  */
 
-import { NextResponse } from "next/server";
+import { NextRequest, NextResponse } from "next/server";
 import {
   fetchBlsCpiPilot,
   blsPeriodToMonth,
@@ -23,6 +21,14 @@ import { writeAuthoritativeBatch } from "@/layers/data-acquisition/authoritative
 import type { AuthoritativeObservation } from "@/layers/data-acquisition/authoritative-writer";
 
 export const dynamic = "force-dynamic";
+
+function isAuthorized(request: NextRequest): boolean {
+  const secret = process.env.CRON_SECRET?.trim();
+  if (!secret) return false;
+
+  const authorization = request.headers.get("authorization");
+  return authorization === `Bearer ${secret}`;
+}
 
 function toObservations(
   indicator: "CPI" | "CORE_CPI",
@@ -56,7 +62,14 @@ function toObservations(
   }));
 }
 
-export async function GET() {
+export async function POST(request: NextRequest) {
+  if (!isAuthorized(request)) {
+    return NextResponse.json(
+      { success: false, error: "Unauthorized" },
+      { status: 401 }
+    );
+  }
+
   try {
     const endYear = new Date().getUTCFullYear();
     const startYear = endYear - 1;
@@ -91,7 +104,10 @@ export async function GET() {
       source: "BLS",
       range: { startYear, endYear },
       rowsSeen: observations.length,
-      rowsWritten: results.reduce((sum, result) => sum + result.rowsWritten, 0),
+      rowsWritten: results.reduce(
+        (sum, result) => sum + result.rowsWritten,
+        0
+      ),
       results,
     });
   } catch (error) {
@@ -101,7 +117,8 @@ export async function GET() {
       {
         success: false,
         stage: "authoritative-cpi-ingestion",
-        reason: "Could not complete the authoritative CPI sync. Check server logs.",
+        reason:
+          "Could not complete the authoritative CPI sync. Check server logs.",
       },
       { status: 500 }
     );
