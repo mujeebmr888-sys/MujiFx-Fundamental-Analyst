@@ -36,6 +36,9 @@ import {
   FED_FUNDS_H15_SERIES_ID,
   fetchFedFundsPilot,
 } from "@/layers/data-acquisition/sources/fed-funds";
+import {
+  enrichWithVerifiedReleaseDate,
+} from "@/layers/data-acquisition/release-calendar";
 import { writeAuthoritativeBatch } from "@/layers/data-acquisition/authoritative-writer";
 import type { AuthoritativeObservation } from "@/layers/data-acquisition/authoritative-writer";
 
@@ -61,9 +64,7 @@ function mapBlsIndexRows(
   retrievedAt: string
 ): AuthoritativeObservation[] {
   const sorted = [...rows].sort((a, b) =>
-    blsPeriodToMonth(a.year, a.period).localeCompare(
-      blsPeriodToMonth(b.year, b.period)
-    )
+    blsPeriodToMonth(a.year, a.period).localeCompare(blsPeriodToMonth(b.year, b.period))
   );
 
   return sorted.map((row, index) => ({
@@ -104,9 +105,7 @@ function mapBlsEmploymentRows(
   if (!indicator || !unit) return [];
 
   const sorted = [...rows].sort((a, b) =>
-    blsEmploymentPeriodToMonth(a.year, a.period).localeCompare(
-      blsEmploymentPeriodToMonth(b.year, b.period)
-    )
+    blsEmploymentPeriodToMonth(a.year, a.period).localeCompare(blsEmploymentPeriodToMonth(b.year, b.period))
   );
 
   return sorted.map((row, index) => ({
@@ -139,17 +138,11 @@ function normalizeBeaQuarter(timePeriod: string): string | null {
 
 export async function POST(request: Request) {
   if (!process.env.CRON_SECRET) {
-    return NextResponse.json(
-      { success: false, reason: "CRON_SECRET is not configured." },
-      { status: 503 }
-    );
+    return NextResponse.json({ success: false, reason: "CRON_SECRET is not configured." }, { status: 503 });
   }
 
   if (!isAuthorized(request)) {
-    return NextResponse.json(
-      { success: false, reason: "Unauthorized." },
-      { status: 401 }
-    );
+    return NextResponse.json({ success: false, reason: "Unauthorized." }, { status: 401 });
   }
 
   const endYear = new Date().getUTCFullYear();
@@ -167,37 +160,20 @@ export async function POST(request: Request) {
 
     const observations: AuthoritativeObservation[] = [
       ...mapBlsIndexRows("CPI", cpi.seriesId, cpi.observations, cpi.retrievedAt),
-      ...mapBlsIndexRows(
-        "CORE_CPI",
-        BLS_CORE_CPI_SERIES_ID,
-        coreCpi.observations,
-        coreCpi.retrievedAt
-      ),
+      ...mapBlsIndexRows("CORE_CPI", BLS_CORE_CPI_SERIES_ID, coreCpi.observations, coreCpi.retrievedAt),
     ];
 
     for (const seriesId of Object.values(BLS_EMPLOYMENT_SERIES)) {
-      const rows = employment.observations.filter(
-        (observation) => observation.seriesId === seriesId
-      );
-      observations.push(
-        ...mapBlsEmploymentRows(seriesId, rows, employment.retrievedAt)
-      );
+      const rows = employment.observations.filter((observation) => observation.seriesId === seriesId);
+      observations.push(...mapBlsEmploymentRows(seriesId, rows, employment.retrievedAt));
     }
 
     for (const lineCode of [BEA_PCE_LINE_CODE, BEA_CORE_PCE_LINE_CODE]) {
       const indicator = lineCode === BEA_PCE_LINE_CODE ? "PCE" : "CORE_PCE";
       const normalized = pce.observations
         .filter((observation) => observation.lineCode === lineCode)
-        .map((observation) => ({
-          observation,
-          period: normalizeBeaMonth(observation.timePeriod),
-        }))
-        .filter(
-          (entry): entry is {
-            observation: (typeof pce.observations)[number];
-            period: string;
-          } => Boolean(entry.period)
-        )
+        .map((observation) => ({ observation, period: normalizeBeaMonth(observation.timePeriod) }))
+        .filter((entry): entry is { observation: (typeof pce.observations)[number]; period: string } => Boolean(entry.period))
         .sort((a, b) => a.period.localeCompare(b.period));
 
       normalized.forEach((entry, index) => {
@@ -220,16 +196,8 @@ export async function POST(request: Request) {
 
     const normalizedGdp = gdp.observations
       .filter((observation) => observation.lineCode === BEA_GDP_GROWTH_LINE_CODE)
-      .map((observation) => ({
-        observation,
-        period: normalizeBeaQuarter(observation.timePeriod),
-      }))
-      .filter(
-        (entry): entry is {
-          observation: (typeof gdp.observations)[number];
-          period: string;
-        } => Boolean(entry.period)
-      )
+      .map((observation) => ({ observation, period: normalizeBeaQuarter(observation.timePeriod) }))
+      .filter((entry): entry is { observation: (typeof gdp.observations)[number]; period: string } => Boolean(entry.period))
       .sort((a, b) => a.period.localeCompare(b.period));
 
     normalizedGdp.forEach((entry, index) => {
@@ -249,10 +217,7 @@ export async function POST(request: Request) {
       });
     });
 
-    const fedRows = [...fedFunds.observations].sort((a, b) =>
-      a.period.localeCompare(b.period)
-    );
-
+    const fedRows = [...fedFunds.observations].sort((a, b) => a.period.localeCompare(b.period));
     fedRows.forEach((row, index) => {
       observations.push({
         indicator: "FED_FUNDS_RATE",
@@ -270,17 +235,28 @@ export async function POST(request: Request) {
       });
     });
 
+    // Resolve official publication dates after all observations are normalized.
+    // Fed H.15 intentionally remains unverified for now.
+    const enrichedObservations = await Promise.all(
+      observations.map((observation) => enrichWithVerifiedReleaseDate(observation))
+    );
+
     const results = await writeAuthoritativeBatch(
       "MUJIFX P0 Official Sources (BLS/BEA/Federal Reserve)",
-      observations
+      enrichedObservations
     );
+
+    const verifiedReleaseDates = enrichedObservations.filter(
+      (observation) => observation.sourceReleaseDateVerified
+    ).length;
 
     return NextResponse.json({
       success: true,
       source: "BLS + BEA + Federal Reserve",
       range: { startYear, endYear },
-      rowsSeen: observations.length,
+      rowsSeen: enrichedObservations.length,
       rowsWritten: results.reduce((sum, item) => sum + item.rowsWritten, 0),
+      verifiedReleaseDates,
       results,
     });
   } catch (error) {
