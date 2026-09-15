@@ -13,7 +13,7 @@ export interface BlsMonthlySnapshotCell {
 
 export interface BlsMonthlySnapshotRow {
   observationDate: string;
-  value: number;
+  value: number | null;
   isMissing: boolean;
 }
 
@@ -27,8 +27,8 @@ function parseValue(
   value: string | number | null | undefined,
   observationDate: string,
   isMissing: boolean
-): number {
-  if (isMissing) return 0;
+): number | null {
+  if (isMissing) return null;
 
   if (typeof value === "number") {
     if (Number.isFinite(value)) return value;
