@@ -12,6 +12,7 @@ import {
   blsPublishedSnapshotProvenance,
   type BlsPublishedSnapshotDescriptor,
 } from "@/layers/data-acquisition/sources/bls-snapshot-provenance";
+import { parseBlsCpiSnapshotRows } from "@/layers/data-acquisition/sources/bls-cpi-snapshot-parser";
 import { writeAuthoritativeVintage } from "@/layers/historical-database/authoritative-vintage-writer";
 
 export interface BlsNfpSnapshotRow {
@@ -30,12 +31,6 @@ export interface WriteBlsNfpSnapshotInput {
   retrievedAt: string;
   snapshot: BlsPublishedSnapshotDescriptor;
   rows: BlsNfpSnapshotRow[];
-}
-
-function assertMonth(value: string): void {
-  if (!/^\d{4}-(0[1-9]|1[0-2])$/.test(value)) {
-    throw new Error(`BLS NFP observationDate must be YYYY-MM: ${value}`);
-  }
 }
 
 /**
@@ -62,14 +57,9 @@ export async function writeBlsNfpSnapshot(
   const provenance = blsPublishedSnapshotProvenance(input.snapshot);
   const results: unknown[] = [];
 
-  for (const row of input.rows) {
-    assertMonth(row.observationDate);
-    if (!Number.isFinite(row.value)) {
-      throw new Error(
-        `BLS NFP snapshot contains a non-finite value for ${row.observationDate}.`
-      );
-    }
+  const parsedRows = parseBlsCpiSnapshotRows(input.rows);
 
+  for (const row of parsedRows) {
     results.push(
       await writeAuthoritativeVintage(
         {
