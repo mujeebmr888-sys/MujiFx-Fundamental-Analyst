@@ -17,6 +17,7 @@ import { writeBlsNfpSnapshot } from "@/layers/data-acquisition/sources/bls-nfp-v
 export const dynamic = "force-dynamic";
 
 const MAX_ROWS = 5000;
+const BLS_NFP_VINTAGE_PATH = "/web/empsit/cesvin00.xlsx";
 type SnapshotKind = "NFP";
 
 interface SnapshotBody {
@@ -42,6 +43,17 @@ function authorized(request: Request): boolean {
   return headerSecret === secret || authorization === `Bearer ${secret}`;
 }
 
+function parseIsoDate(value: string, field: string): Date {
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(value)) {
+    throw new Error(`${field} must be YYYY-MM-DD.`);
+  }
+  const parsed = new Date(`${value}T00:00:00Z`);
+  if (Number.isNaN(parsed.getTime()) || parsed.toISOString().slice(0, 10) !== value) {
+    throw new Error(`${field} is invalid: ${value}`);
+  }
+  return parsed;
+}
+
 function assertOfficialSnapshotUrl(snapshotUrl: string): void {
   let parsed: URL;
   try {
@@ -54,8 +66,39 @@ function assertOfficialSnapshotUrl(snapshotUrl: string): void {
     throw new Error("snapshotUrl must use HTTPS.");
   }
 
-  if (parsed.hostname !== "www.bls.gov") {
-    throw new Error("NFP snapshots must come from the official www.bls.gov host.");
+  if (parsed.hostname !== "www.bls.gov" || parsed.pathname !== BLS_NFP_VINTAGE_PATH) {
+    throw new Error(
+      `NFP snapshots must use the official BLS total-nonfarm vintage file: ${BLS_NFP_VINTAGE_PATH}.`
+    );
+  }
+}
+
+function assertNfpVintageDateSemantics(
+  observationDate: string,
+  releaseDate: string,
+  publicationDate: string
+): void {
+  const observationMatch = /^(\d{4})-(\d{2})$/.exec(observationDate);
+  if (!observationMatch) {
+    throw new Error(`BLS NFP observationDate must be YYYY-MM: ${observationDate}`);
+  }
+
+  const release = parseIsoDate(releaseDate, "releaseDate");
+  const publication = parseIsoDate(publicationDate, "snapshot publicationDate");
+  const observationEnd = new Date(
+    Date.UTC(Number(observationMatch[1]), Number(observationMatch[2]), 0)
+  );
+
+  if (release <= observationEnd) {
+    throw new Error(
+      `NFP releaseDate ${releaseDate} must be after observation month ${observationDate}.`
+    );
+  }
+
+  if (release > publication) {
+    throw new Error(
+      `NFP releaseDate ${releaseDate} cannot be after snapshot publicationDate ${publicationDate}.`
+    );
   }
 }
 
@@ -92,6 +135,7 @@ function validateBody(body: unknown): SnapshotBody {
   }
 
   assertOfficialSnapshotUrl(snapshot.snapshotUrl);
+  parseIsoDate(snapshot.publicationDate, "snapshot publicationDate");
 
   for (const row of input.rows) {
     if (
@@ -105,6 +149,12 @@ function validateBody(body: unknown): SnapshotBody {
         "Every NFP vintage row needs observationDate, releaseDate and a finite numeric value."
       );
     }
+
+    assertNfpVintageDateSemantics(
+      row.observationDate.trim(),
+      row.releaseDate.trim(),
+      snapshot.publicationDate.trim()
+    );
   }
 
   return {
