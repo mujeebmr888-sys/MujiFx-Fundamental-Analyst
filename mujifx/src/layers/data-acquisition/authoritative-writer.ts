@@ -128,6 +128,7 @@ export async function writeAuthoritativeObservation(
       value: observation.actual,
       isMissing: false,
       realtimeStart: observation.sourceReleaseDate,
+      realtimeEnd: null,
       retrievedAt: observation.retrievedAt,
       sourceName: observation.sourceName,
       sourceUrl: observation.sourceUrl,
