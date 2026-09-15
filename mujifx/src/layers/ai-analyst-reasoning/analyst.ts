@@ -49,7 +49,8 @@ export async function generateAnalystAssessment(
 ): Promise<AnalystAssessment | null> {
   const apiKey = process.env.GEMINI_API_KEY;
   if (!apiKey) {
-    console.error("GEMINI_API_KEY is not configured.");
+    // AI commentary is an optional layer. Do not turn a missing optional
+    // credential into a production error for the core data pipeline.
     return null;
   }
 
