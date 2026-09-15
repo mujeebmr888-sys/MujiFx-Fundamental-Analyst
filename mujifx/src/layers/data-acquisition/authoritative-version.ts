@@ -3,8 +3,8 @@
  *
  * A retrieval timestamp is not a source vintage. A point-in-time observation
  * may only be archived when the official source gives us an explicit version
- * or a published snapshot that represents the information set at a known
- * release/publication point.
+ * or a published source artifact that is explicitly known to preserve the
+ * information set at that release point.
  */
 
 export type AuthoritativeVersionEvidence =
@@ -19,14 +19,10 @@ export interface AuthoritativeVersionProvenance {
   snapshotUrl: string | null;
   availableFrom: string | null;
   availableUntil: string | null;
+  /** True only when the source artifact is suitable for point-in-time vintage storage. */
+  vintageEligible: boolean;
 }
 
-/**
- * BLS Public Data API responses contain published observations but do not
- * expose an immutable revision/vintage identifier for those observations.
- * Keep the retrieval timestamp for audit purposes, but do not promote it to
- * sourceVersion and do not send API-only results into vintage storage.
- */
 export function blsApiRetrievalProvenance(): AuthoritativeVersionProvenance {
   return {
     evidence: "API_RETRIEVAL_ONLY",
@@ -35,12 +31,14 @@ export function blsApiRetrievalProvenance(): AuthoritativeVersionProvenance {
     snapshotUrl: null,
     availableFrom: null,
     availableUntil: null,
+    vintageEligible: false,
   };
 }
 
 /**
- * Guard used by future version-aware ingestion paths. This deliberately
- * rejects current API reads and prevents accidental fake vintages.
+ * Guard used by version-aware ingestion paths. A published snapshot is not
+ * automatically a vintage: the source must explicitly support preserving the
+ * information set represented by that snapshot.
  */
 export function assertVintageEligible(
   provenance: AuthoritativeVersionProvenance,
@@ -48,14 +46,16 @@ export function assertVintageEligible(
 ): asserts provenance is AuthoritativeVersionProvenance & {
   evidence: "EXPLICIT_SOURCE_VERSION" | "PUBLISHED_SNAPSHOT";
   sourceVersion: string;
+  vintageEligible: true;
 } {
   if (
     (provenance.evidence !== "EXPLICIT_SOURCE_VERSION" &&
       provenance.evidence !== "PUBLISHED_SNAPSHOT") ||
-    !provenance.sourceVersion?.trim()
+    !provenance.sourceVersion?.trim() ||
+    provenance.vintageEligible !== true
   ) {
     throw new Error(
-      `Vintage ingestion blocked for ${context}: authoritative source does not provide a versioned snapshot.`
+      `Vintage ingestion blocked for ${context}: authoritative source does not provide an explicitly vintage-eligible versioned snapshot.`
     );
   }
 }
