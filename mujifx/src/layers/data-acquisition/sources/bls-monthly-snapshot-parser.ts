@@ -8,6 +8,7 @@
 export interface BlsMonthlySnapshotCell {
   observationDate: string;
   value: string | number | null | undefined;
+  isMissing?: boolean;
 }
 
 export interface BlsMonthlySnapshotRow {
@@ -22,7 +23,13 @@ function assertMonth(value: string): void {
   }
 }
 
-function parseValue(value: string | number | null | undefined, observationDate: string): number {
+function parseValue(
+  value: string | number | null | undefined,
+  observationDate: string,
+  isMissing: boolean
+): number {
+  if (isMissing) return 0;
+
   if (typeof value === "number") {
     if (Number.isFinite(value)) return value;
   } else if (typeof value === "string") {
@@ -55,10 +62,11 @@ export function parseBlsMonthlySnapshotRows(
     }
     seen.add(observationDate);
 
+    const isMissing = cell.isMissing === true;
     return {
       observationDate,
-      value: parseValue(cell.value, observationDate),
-      isMissing: false,
+      value: parseValue(cell.value, observationDate, isMissing),
+      isMissing,
     };
   });
 }
