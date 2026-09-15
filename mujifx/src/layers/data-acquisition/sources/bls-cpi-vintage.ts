@@ -17,7 +17,7 @@ import { writeAuthoritativeVintage } from "@/layers/historical-database/authorit
 
 export interface BlsCpiSnapshotRow {
   observationDate: string;
-  value: number;
+  value: number | null;
   isMissing?: boolean;
 }
 
