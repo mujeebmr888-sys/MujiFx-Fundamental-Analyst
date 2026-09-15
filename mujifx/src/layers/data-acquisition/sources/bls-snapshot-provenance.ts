@@ -15,9 +15,16 @@ export interface BlsPublishedSnapshotDescriptor {
   label: string;
 }
 
+const BLS_NFP_VINTAGE_PATH = "/web/empsit/cesvin00.xlsx";
+
 function assertIsoDate(value: string, field: string): void {
   if (!/^\d{4}-\d{2}-\d{2}$/.test(value)) {
     throw new Error(`BLS snapshot ${field} must be YYYY-MM-DD.`);
+  }
+
+  const parsed = new Date(`${value}T00:00:00Z`);
+  if (Number.isNaN(parsed.getTime()) || parsed.toISOString().slice(0, 10) !== value) {
+    throw new Error(`BLS snapshot ${field} is invalid: ${value}`);
   }
 }
 
@@ -58,6 +65,24 @@ export function blsExplicitVintageProvenance(
   releaseDate: string
 ): AuthoritativeVersionProvenance {
   validate(descriptor);
+
+  let parsedUrl: URL;
+  try {
+    parsedUrl = new URL(descriptor.snapshotUrl);
+  } catch {
+    throw new Error("BLS NFP vintage snapshotUrl must be a valid HTTPS URL.");
+  }
+
+  if (
+    parsedUrl.protocol !== "https:" ||
+    parsedUrl.hostname !== "www.bls.gov" ||
+    parsedUrl.pathname !== BLS_NFP_VINTAGE_PATH
+  ) {
+    throw new Error(
+      `BLS NFP vintage provenance requires the official ${BLS_NFP_VINTAGE_PATH} artifact.`
+    );
+  }
+
   assertIsoDate(releaseDate, "releaseDate");
   return {
     evidence: "EXPLICIT_SOURCE_VERSION",
