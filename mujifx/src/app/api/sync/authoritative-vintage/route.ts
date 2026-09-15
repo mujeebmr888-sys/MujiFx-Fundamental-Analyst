@@ -28,6 +28,7 @@ interface SnapshotBody {
   };
   rows: Array<{
     observationDate: string;
+    releaseDate: string;
     value: number;
     isMissing?: boolean;
   }>;
@@ -96,10 +97,13 @@ function validateBody(body: unknown): SnapshotBody {
     if (
       !row ||
       typeof row.observationDate !== "string" ||
+      typeof row.releaseDate !== "string" ||
       typeof row.value !== "number" ||
       !Number.isFinite(row.value)
     ) {
-      throw new Error("Every row needs observationDate and a finite numeric value.");
+      throw new Error(
+        "Every NFP vintage row needs observationDate, releaseDate and a finite numeric value."
+      );
     }
   }
 
