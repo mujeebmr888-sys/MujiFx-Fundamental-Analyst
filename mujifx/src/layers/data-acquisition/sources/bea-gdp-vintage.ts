@@ -11,6 +11,7 @@ import {
   beaPublishedSnapshotProvenance,
   type BeaPublishedSnapshotDescriptor,
 } from "@/layers/data-acquisition/sources/bea-snapshot-provenance";
+import { assertFiniteSnapshotRows } from "@/layers/data-acquisition/sources/published-snapshot-validation";
 import { writeAuthoritativeVintage } from "@/layers/historical-database/authoritative-vintage-writer";
 
 export interface BeaGdpSnapshotRow {
@@ -40,9 +41,7 @@ function assertQuarter(value: string): void {
 export async function writeBeaGdpSnapshot(
   input: WriteBeaGdpSnapshotInput
 ): Promise<unknown[]> {
-  if (!input.rows.length) {
-    throw new Error("BEA GDP snapshot contains no observations.");
-  }
+  assertFiniteSnapshotRows(input.rows, "BEA GDP");
 
   if (input.tableId !== "T10101" || input.lineCode !== "1") {
     throw new Error("BEA GDP growth must use NIPA T10101 line 1.");
@@ -53,17 +52,12 @@ export async function writeBeaGdpSnapshot(
 
   for (const row of input.rows) {
     assertQuarter(row.observationDate);
-    if (!Number.isFinite(row.value)) {
-      throw new Error(
-        `BEA GDP snapshot contains a non-finite value for ${row.observationDate}.`
-      );
-    }
 
     results.push(
       await writeAuthoritativeVintage(
         {
           indicator: input.indicator,
-          observationDate: row.observationDate,
+          observationDate: row.observationDate.trim(),
           value: row.value,
           isMissing: row.isMissing ?? false,
           retrievedAt: input.retrievedAt,
