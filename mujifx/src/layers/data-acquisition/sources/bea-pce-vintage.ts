@@ -1,9 +1,8 @@
 /**
  * BEA PCE PRICE INDEX PUBLISHED-SNAPSHOT VINTAGE ADAPTER
  *
- * BEA publishes Personal Income and Outlays data with release/version
- * context. This adapter accepts rows parsed from an exact BEA published
- * snapshot and never treats a live API retrieval as vintage evidence.
+ * Accepts rows parsed from an exact BEA published snapshot and never treats
+ * a live API retrieval as vintage evidence.
  */
 
 import type { IndicatorId } from "@/types/economic-data";
@@ -11,6 +10,7 @@ import {
   beaPublishedSnapshotProvenance,
   type BeaPublishedSnapshotDescriptor,
 } from "@/layers/data-acquisition/sources/bea-snapshot-provenance";
+import { assertFiniteSnapshotRows } from "@/layers/data-acquisition/sources/published-snapshot-validation";
 import { writeAuthoritativeVintage } from "@/layers/historical-database/authoritative-vintage-writer";
 
 /** BEA NIPA PCE price-index concepts: DPCERG = PCE; DPCCRG = core PCE. */
@@ -48,9 +48,7 @@ function expectedSeries(
 export async function writeBeaPceSnapshot(
   input: WriteBeaPceSnapshotInput
 ): Promise<unknown[]> {
-  if (!input.rows.length) {
-    throw new Error("BEA PCE snapshot contains no observations.");
-  }
+  assertFiniteSnapshotRows(input.rows, `BEA ${input.indicator}`);
 
   if (input.seriesCode !== expectedSeries(input.indicator)) {
     throw new Error(
@@ -63,17 +61,12 @@ export async function writeBeaPceSnapshot(
 
   for (const row of input.rows) {
     assertMonth(row.observationDate);
-    if (!Number.isFinite(row.value)) {
-      throw new Error(
-        `BEA PCE snapshot contains a non-finite value for ${row.observationDate}.`
-      );
-    }
 
     results.push(
       await writeAuthoritativeVintage(
         {
           indicator: input.indicator,
-          observationDate: row.observationDate,
+          observationDate: row.observationDate.trim(),
           value: row.value,
           isMissing: row.isMissing ?? false,
           retrievedAt: input.retrievedAt,
