@@ -3,13 +3,13 @@
  *
  * BLS publishes official CES vintage tables containing the employment value
  * for a reference month as it was published at each Employment Situation
- * release. This adapter accepts rows parsed from that official snapshot and
- * never treats the live BLS API as vintage evidence.
+ * release. This adapter accepts rows parsed from that official vintage
+ * artifact and never treats the live BLS API as vintage evidence.
  */
 
 import type { IndicatorId } from "@/types/economic-data";
 import {
-  blsPublishedSnapshotProvenance,
+  blsExplicitVintageProvenance,
   type BlsPublishedSnapshotDescriptor,
 } from "@/layers/data-acquisition/sources/bls-snapshot-provenance";
 import { parseBlsMonthlySnapshotRows } from "@/layers/data-acquisition/sources/bls-monthly-snapshot-parser";
@@ -46,7 +46,7 @@ export async function writeBlsNfpSnapshot(
     );
   }
 
-  const provenance = blsPublishedSnapshotProvenance(input.snapshot);
+  const provenance = blsExplicitVintageProvenance(input.snapshot);
   const parsedRows = parseBlsMonthlySnapshotRows(input.rows);
   const results: unknown[] = [];
 
@@ -64,7 +64,7 @@ export async function writeBlsNfpSnapshot(
           sourceTier: input.sourceTier,
           provenance,
         },
-        `BLS CES total nonfarm published snapshot ${input.snapshot.label}`
+        `BLS CES total nonfarm vintage snapshot ${input.snapshot.label}`
       )
     );
   }
