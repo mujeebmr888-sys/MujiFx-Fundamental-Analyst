@@ -3,6 +3,10 @@
     {
       "path": "/api/sync/all",
       "schedule": "0 13 * * *"
+    },
+    {
+      "path": "/api/sync/authoritative-p0-cron",
+      "schedule": "15 13 * * *"
     }
   ]
 }
