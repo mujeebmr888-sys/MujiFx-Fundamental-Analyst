@@ -7,13 +7,13 @@
  * - Observation date is NEVER used as release date.
  * - release_date is only populated when the official source explicitly
  *   provides/verifies the release date.
- * - Verified release dates also create point-in-time vintages.
+ * - Point-in-time vintages require source/version-safe provenance and are
+ *   written by dedicated vintage ingestion, not by the current-data writer.
  * - FRED/ALFRED is not used by this writer for archival storage.
  */
 
 import { supabaseAdmin } from "@/config/supabase-admin";
 import type { IndicatorId } from "@/types/economic-data";
-import { saveVintageObservation } from "@/layers/historical-database/vintage-database";
 
 export interface AuthoritativeObservation {
   indicator: IndicatorId;
@@ -68,13 +68,13 @@ function validateObservation(observation: AuthoritativeObservation): void {
 }
 
 /**
- * Writes one authoritative observation into the CURRENT data plane and,
- * when an official release date is verified, the POINT-IN-TIME data plane.
+ * Writes one authoritative observation into the CURRENT data plane.
  *
- * A vintage is never created without a verified information/release date.
- * This prevents observation dates from being incorrectly treated as
- * publication dates and prevents later revisions from masquerading as
- * historical initial releases.
+ * Release dates are metadata about the current authoritative observation.
+ * This function deliberately does not create a point-in-time vintage from a
+ * release-calendar date alone because the current API value may be a later
+ * revision. A dedicated source/version-aware ingestion path must establish
+ * the exact information set before writing a vintage.
  */
 export async function writeAuthoritativeObservation(
   observation: AuthoritativeObservation
@@ -93,6 +93,11 @@ export async function writeAuthoritativeObservation(
     previous: observation.previous ?? null,
     consensus_forecast: null,
     mujifx_estimate: null,
+    mujifx_estimate_low: null,
+    mujifx_estimate_high: null,
+    mujifx_confidence: null,
+    mujifx_rationale: null,
+    mujifx_risks: null,
     actual: observation.actual,
     unit: observation.unit,
     available: true,
@@ -119,21 +124,6 @@ export async function writeAuthoritativeObservation(
 
   if (!data) {
     throw new Error(`Authoritative write returned no row for ${observation.indicator}.`);
-  }
-
-  if (observation.sourceReleaseDateVerified && observation.sourceReleaseDate) {
-    await saveVintageObservation({
-      indicator: observation.indicator,
-      observationDate: periodCovered,
-      value: observation.actual,
-      isMissing: false,
-      realtimeStart: observation.sourceReleaseDate,
-      realtimeEnd: null,
-      retrievedAt: observation.retrievedAt,
-      sourceName: observation.sourceName,
-      sourceUrl: observation.sourceUrl,
-      sourceTier: observation.sourceTier,
-    });
   }
 
   return data;
