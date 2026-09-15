@@ -1,8 +1,9 @@
 /**
  * BEA PUBLISHED SNAPSHOT PROVENANCE
  *
- * A BEA release/publication snapshot is version evidence. Retrieval time
- * alone is not a historical vintage and must never be promoted to one.
+ * A BEA publication artifact is useful source evidence, but it is not
+ * automatically an immutable historical vintage. Vintage eligibility must be
+ * established by a source-specific versioned artifact.
  */
 import type { AuthoritativeVersionProvenance } from "@/layers/data-acquisition/authoritative-version";
 
@@ -32,5 +33,6 @@ export function beaPublishedSnapshotProvenance(
     snapshotUrl: descriptor.snapshotUrl.trim(),
     availableFrom: descriptor.publicationDate,
     availableUntil: null,
+    vintageEligible: false,
   };
 }
