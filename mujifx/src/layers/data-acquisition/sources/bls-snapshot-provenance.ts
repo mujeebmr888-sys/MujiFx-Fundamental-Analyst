@@ -15,13 +15,17 @@ export interface BlsPublishedSnapshotDescriptor {
   label: string;
 }
 
+function assertIsoDate(value: string, field: string): void {
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(value)) {
+    throw new Error(`BLS snapshot ${field} must be YYYY-MM-DD.`);
+  }
+}
+
 function validate(descriptor: BlsPublishedSnapshotDescriptor): void {
   if (!descriptor.snapshotUrl.trim()) {
     throw new Error("BLS snapshot URL is required.");
   }
-  if (!/^\d{4}-\d{2}-\d{2}$/.test(descriptor.publicationDate)) {
-    throw new Error("BLS snapshot publicationDate must be YYYY-MM-DD.");
-  }
+  assertIsoDate(descriptor.publicationDate, "publicationDate");
   if (!descriptor.label.trim()) {
     throw new Error("BLS snapshot label is required.");
   }
@@ -44,20 +48,23 @@ export function blsPublishedSnapshotProvenance(
 }
 
 /**
- * Reserved for BLS artifacts whose documentation explicitly preserves the
- * information set as published at a release point (for example CES vintage
- * tables). Callers must use this only for such source-specific evidence.
+ * CES vintage-table provenance. The release date is per observation because
+ * one official vintage table contains many publication releases for the same
+ * reference month. The table artifact URL is audit provenance; releaseDate is
+ * the actual point-in-time version key.
  */
 export function blsExplicitVintageProvenance(
-  descriptor: BlsPublishedSnapshotDescriptor
+  descriptor: BlsPublishedSnapshotDescriptor,
+  releaseDate: string
 ): AuthoritativeVersionProvenance {
   validate(descriptor);
+  assertIsoDate(releaseDate, "releaseDate");
   return {
     evidence: "EXPLICIT_SOURCE_VERSION",
-    sourceVersion: descriptor.publicationDate,
-    sourceVersionLabel: descriptor.label.trim(),
+    sourceVersion: releaseDate,
+    sourceVersionLabel: `${descriptor.label.trim()} release ${releaseDate}`,
     snapshotUrl: descriptor.snapshotUrl.trim(),
-    availableFrom: descriptor.publicationDate,
+    availableFrom: releaseDate,
     availableUntil: null,
     vintageEligible: true,
   };
