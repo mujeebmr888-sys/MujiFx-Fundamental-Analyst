@@ -7,7 +7,7 @@
 
 export interface PublishedSnapshotRow {
   observationDate: string;
-  value: number;
+  value: number | null;
   isMissing?: boolean;
 }
 
@@ -29,9 +29,14 @@ export function assertFiniteSnapshotRows<T extends PublishedSnapshotRow>(
       throw new Error(`Duplicate ${label} observationDate: ${observationDate}`);
     }
     seen.add(observationDate);
-    if (row.isMissing !== true && !Number.isFinite(row.value)) {
+    if (row.isMissing !== true && row.value !== null && !Number.isFinite(row.value)) {
       throw new Error(
         `${label} snapshot contains a non-finite value for ${observationDate}.`
+      );
+    }
+    if (row.isMissing === true && row.value !== null) {
+      throw new Error(
+        `${label} snapshot marks ${observationDate} as missing but also provides a value.`
       );
     }
   }
