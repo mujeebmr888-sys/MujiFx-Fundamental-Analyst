@@ -1,23 +1,19 @@
 /**
  * BEA PCE PRICE INDEX PUBLISHED-SNAPSHOT VINTAGE ADAPTER
  *
- * BEA publishes Personal Income and Outlays data and GDP products with
- * release/version context. This adapter accepts rows parsed from an exact
- * BEA published snapshot and refuses to treat a live API retrieval as a
- * point-in-time vintage.
+ * BEA publishes Personal Income and Outlays data with release/version
+ * context. This adapter accepts rows parsed from an exact BEA published
+ * snapshot and never treats a live API retrieval as vintage evidence.
  */
 
 import type { IndicatorId } from "@/types/economic-data";
 import {
-  blsPublishedSnapshotProvenance,
-  type BlsPublishedSnapshotDescriptor,
-} from "@/layers/data-acquisition/sources/bls-snapshot-provenance";
+  beaPublishedSnapshotProvenance,
+  type BeaPublishedSnapshotDescriptor,
+} from "@/layers/data-acquisition/sources/bea-snapshot-provenance";
 import { writeAuthoritativeVintage } from "@/layers/historical-database/authoritative-vintage-writer";
 
-/**
- * BEA NIPA Table 2.4.4U / related published PCE price-index concepts:
- * DPCERG = PCE price index; DPCCRG = PCE excluding food and energy.
- */
+/** BEA NIPA PCE price-index concepts: DPCERG = PCE; DPCCRG = core PCE. */
 export type BeaPceSeries = "DPCERG" | "DPCCRG";
 
 export interface BeaPceSnapshotRow {
@@ -33,7 +29,7 @@ export interface WriteBeaPceSnapshotInput {
   sourceUrl: string;
   sourceTier: "TIER_1_OFFICIAL";
   retrievedAt: string;
-  snapshot: BlsPublishedSnapshotDescriptor;
+  snapshot: BeaPublishedSnapshotDescriptor;
   rows: BeaPceSnapshotRow[];
 }
 
@@ -43,14 +39,12 @@ function assertMonth(value: string): void {
   }
 }
 
-function expectedSeries(indicator: WriteBeaPceSnapshotInput["indicator"]): BeaPceSeries {
+function expectedSeries(
+  indicator: WriteBeaPceSnapshotInput["indicator"]
+): BeaPceSeries {
   return indicator === "PCE" ? "DPCERG" : "DPCCRG";
 }
 
-/**
- * Persist one exact BEA PCE/Core PCE published snapshot as point-in-time
- * observations. The supplied publication date is the version evidence.
- */
 export async function writeBeaPceSnapshot(
   input: WriteBeaPceSnapshotInput
 ): Promise<unknown[]> {
@@ -64,7 +58,7 @@ export async function writeBeaPceSnapshot(
     );
   }
 
-  const provenance = blsPublishedSnapshotProvenance(input.snapshot);
+  const provenance = beaPublishedSnapshotProvenance(input.snapshot);
   const results: unknown[] = [];
 
   for (const row of input.rows) {
