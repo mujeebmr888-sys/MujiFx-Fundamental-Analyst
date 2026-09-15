@@ -266,7 +266,6 @@ export async function POST(request: Request) {
         sourceReleaseDate: null,
         sourceReleaseDateVerified: false,
         retrievedAt: fedFunds.retrievedAt,
-        sourceReleaseDateVerified: false,
         previous: index > 0 ? fedRows[index - 1].value : null,
       });
     });
