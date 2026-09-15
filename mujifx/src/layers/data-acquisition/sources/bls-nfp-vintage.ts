@@ -1,10 +1,10 @@
 /**
- * BLS CES TOTAL NONFARM PAYROLL PUBLISHED-VINTAGE ADAPTER
+ * BLS CES TOTAL NONFARM PAYROLL VINTAGE ADAPTER
  *
- * BLS publishes official CES vintage tables containing the employment value
- * for a reference month as it was published at each Employment Situation
- * release. This adapter accepts rows parsed from that official vintage
- * artifact and never treats the live BLS API as vintage evidence.
+ * BLS publishes official CES vintage tables containing employment values for
+ * a reference month as published at each Employment Situation release.
+ * A vintage row therefore needs BOTH the reference/observation month and the
+ * release date that defines the point-in-time information set.
  */
 
 import type { IndicatorId } from "@/types/economic-data";
@@ -12,13 +12,55 @@ import {
   blsExplicitVintageProvenance,
   type BlsPublishedSnapshotDescriptor,
 } from "@/layers/data-acquisition/sources/bls-snapshot-provenance";
-import { parseBlsMonthlySnapshotRows } from "@/layers/data-acquisition/sources/bls-monthly-snapshot-parser";
 import { writeAuthoritativeVintage } from "@/layers/historical-database/authoritative-vintage-writer";
 
 export interface BlsNfpSnapshotRow {
   observationDate: string;
+  releaseDate: string;
   value: number;
   isMissing?: boolean;
+}
+
+function assertMonth(value: string): void {
+  if (!/^\d{4}-(0[1-9]|1[0-2])$/.test(value)) {
+    throw new Error(`BLS NFP observationDate must be YYYY-MM: ${value}`);
+  }
+}
+
+function assertDate(value: string): void {
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(value)) {
+    throw new Error(`BLS NFP releaseDate must be YYYY-MM-DD: ${value}`);
+  }
+}
+
+function validateRows(rows: BlsNfpSnapshotRow[]): void {
+  const seen = new Set<string>();
+
+  for (const row of rows) {
+    if (!row || typeof row !== "object") {
+      throw new Error("BLS NFP vintage rows must be objects.");
+    }
+    if (typeof row.observationDate !== "string") {
+      throw new Error("BLS NFP observationDate is required.");
+    }
+    if (typeof row.releaseDate !== "string") {
+      throw new Error("BLS NFP releaseDate is required for point-in-time vintage storage.");
+    }
+    if (typeof row.value !== "number" || !Number.isFinite(row.value)) {
+      throw new Error("BLS NFP vintage value must be finite.");
+    }
+
+    const observationDate = row.observationDate.trim();
+    const releaseDate = row.releaseDate.trim();
+    assertMonth(observationDate);
+    assertDate(releaseDate);
+
+    const key = `${observationDate}|${releaseDate}`;
+    if (seen.has(key)) {
+      throw new Error(`Duplicate BLS NFP vintage row: ${key}`);
+    }
+    seen.add(key);
+  }
 }
 
 export interface WriteBlsNfpSnapshotInput {
@@ -46,25 +88,30 @@ export async function writeBlsNfpSnapshot(
     );
   }
 
-  const provenance = blsExplicitVintageProvenance(input.snapshot);
-  const parsedRows = parseBlsMonthlySnapshotRows(input.rows);
+  validateRows(input.rows);
   const results: unknown[] = [];
 
-  for (const row of parsedRows) {
+  for (const row of input.rows) {
+    const provenance = blsExplicitVintageProvenance(
+      input.snapshot,
+      row.releaseDate.trim()
+    );
+
     results.push(
       await writeAuthoritativeVintage(
         {
           indicator: input.indicator,
-          observationDate: row.observationDate,
+          observationDate: row.observationDate.trim(),
           value: row.value,
-          isMissing: row.isMissing,
+          isMissing: row.isMissing ?? false,
           retrievedAt: input.retrievedAt,
           sourceName: input.sourceName,
           sourceUrl: input.sourceUrl,
           sourceTier: input.sourceTier,
           provenance,
+          realtimeStart: row.releaseDate.trim(),
         },
-        `BLS CES total nonfarm vintage snapshot ${input.snapshot.label}`
+        `BLS CES total nonfarm vintage ${input.snapshot.label} release ${row.releaseDate}`
       )
     );
   }
