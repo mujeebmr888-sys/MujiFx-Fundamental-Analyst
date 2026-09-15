@@ -5,30 +5,19 @@
  * sources. This endpoint never fetches a live API and never turns retrieval
  * time or a release-calendar date into a vintage by itself.
  *
- * The caller must provide rows already parsed from an exact official
- * published snapshot. Source identity and allowed host are enforced here.
+ * IMPORTANT: only sources with explicit vintage-eligible provenance may use
+ * this endpoint. At present that is the BLS CES NFP vintage table. Other
+ * published snapshots remain available through their source adapters for
+ * future work, but are intentionally not exposed as vintage ingestion paths
+ * until their source-specific version semantics are proven.
  */
 import { NextResponse } from "next/server";
-import { writeBlsCpiSnapshot } from "@/layers/data-acquisition/sources/bls-cpi-vintage";
 import { writeBlsNfpSnapshot } from "@/layers/data-acquisition/sources/bls-nfp-vintage";
-import { writeBlsAheSnapshot } from "@/layers/data-acquisition/sources/bls-ahe-vintage";
-import { writeBeaPceSnapshot } from "@/layers/data-acquisition/sources/bea-pce-vintage";
-import { writeBeaGdpSnapshot } from "@/layers/data-acquisition/sources/bea-gdp-vintage";
-import { writeFedFundsSnapshot } from "@/layers/data-acquisition/sources/fed-funds-vintage";
 
 export const dynamic = "force-dynamic";
 
 const MAX_ROWS = 5000;
-
-type SnapshotKind =
-  | "CPI"
-  | "CORE_CPI"
-  | "NFP"
-  | "AVG_HOURLY_EARNINGS"
-  | "PCE"
-  | "CORE_PCE"
-  | "GDP_GROWTH_RATE"
-  | "FED_FUNDS_RATE";
+type SnapshotKind = "NFP";
 
 interface SnapshotBody {
   kind: SnapshotKind;
@@ -49,21 +38,10 @@ function authorized(request: Request): boolean {
   if (!secret) return false;
   const headerSecret = request.headers.get("x-cron-secret");
   const authorization = request.headers.get("authorization");
-  return (
-    headerSecret === secret ||
-    authorization === `Bearer ${secret}`
-  );
+  return headerSecret === secret || authorization === `Bearer ${secret}`;
 }
 
-function officialHostFor(kind: SnapshotKind): string {
-  return kind === "CPI" || kind === "CORE_CPI" || kind === "NFP" || kind === "AVG_HOURLY_EARNINGS"
-    ? "www.bls.gov"
-    : kind === "PCE" || kind === "CORE_PCE" || kind === "GDP_GROWTH_RATE"
-      ? "www.bea.gov"
-      : "www.federalreserve.gov";
-}
-
-function assertOfficialSnapshotUrl(kind: SnapshotKind, snapshotUrl: string): void {
+function assertOfficialSnapshotUrl(snapshotUrl: string): void {
   let parsed: URL;
   try {
     parsed = new URL(snapshotUrl);
@@ -75,11 +53,8 @@ function assertOfficialSnapshotUrl(kind: SnapshotKind, snapshotUrl: string): voi
     throw new Error("snapshotUrl must use HTTPS.");
   }
 
-  const expectedHost = officialHostFor(kind);
-  if (parsed.hostname !== expectedHost) {
-    throw new Error(
-      `${kind} snapshots must come from the official ${expectedHost} host.`
-    );
+  if (parsed.hostname !== "www.bls.gov") {
+    throw new Error("NFP snapshots must come from the official www.bls.gov host.");
   }
 }
 
@@ -89,19 +64,10 @@ function validateBody(body: unknown): SnapshotBody {
   }
 
   const input = body as Partial<SnapshotBody>;
-  const allowedKinds: SnapshotKind[] = [
-    "CPI",
-    "CORE_CPI",
-    "NFP",
-    "AVG_HOURLY_EARNINGS",
-    "PCE",
-    "CORE_PCE",
-    "GDP_GROWTH_RATE",
-    "FED_FUNDS_RATE",
-  ];
-
-  if (!input.kind || !allowedKinds.includes(input.kind)) {
-    throw new Error("Unsupported authoritative snapshot kind.");
+  if (input.kind !== "NFP") {
+    throw new Error(
+      "Unsupported authoritative vintage kind. Only NFP has a verified source-specific vintage artifact."
+    );
   }
 
   if (!input.snapshot || typeof input.snapshot !== "object") {
@@ -124,7 +90,7 @@ function validateBody(body: unknown): SnapshotBody {
     throw new Error("snapshotUrl, publicationDate and label are required.");
   }
 
-  assertOfficialSnapshotUrl(input.kind, snapshot.snapshotUrl);
+  assertOfficialSnapshotUrl(snapshot.snapshotUrl);
 
   for (const row of input.rows) {
     if (
@@ -138,7 +104,7 @@ function validateBody(body: unknown): SnapshotBody {
   }
 
   return {
-    kind: input.kind,
+    kind: "NFP",
     snapshot,
     rows: input.rows,
   };
@@ -163,87 +129,17 @@ export async function POST(request: Request) {
     const body = validateBody(await request.json());
     const retrievedAt = new Date().toISOString();
     const snapshot = body.snapshot;
-    const sourceTier = "TIER_1_OFFICIAL" as const;
 
-    let written: unknown[];
-
-    switch (body.kind) {
-      case "CPI":
-      case "CORE_CPI":
-        written = await writeBlsCpiSnapshot({
-          seriesId: body.kind === "CPI" ? "CUSR0000SA0" : "CUSR0000SA0L1E",
-          indicator: body.kind,
-          sourceName: "U.S. Bureau of Labor Statistics (BLS)",
-          sourceUrl: snapshot.snapshotUrl,
-          sourceTier,
-          retrievedAt,
-          snapshot,
-          rows: body.rows,
-        });
-        break;
-      case "NFP":
-        written = await writeBlsNfpSnapshot({
-          seriesId: "CES0000000001",
-          indicator: "NFP",
-          sourceName: "U.S. Bureau of Labor Statistics (BLS)",
-          sourceUrl: snapshot.snapshotUrl,
-          sourceTier,
-          retrievedAt,
-          snapshot,
-          rows: body.rows,
-        });
-        break;
-      case "AVG_HOURLY_EARNINGS":
-        written = await writeBlsAheSnapshot({
-          seriesId: "CES0500000003",
-          indicator: "AVG_HOURLY_EARNINGS",
-          sourceName: "U.S. Bureau of Labor Statistics (BLS)",
-          sourceUrl: snapshot.snapshotUrl,
-          sourceTier,
-          retrievedAt,
-          snapshot,
-          rows: body.rows,
-        });
-        break;
-      case "PCE":
-      case "CORE_PCE":
-        written = await writeBeaPceSnapshot({
-          seriesCode: body.kind === "PCE" ? "DPCERG" : "DPCCRG",
-          indicator: body.kind,
-          sourceName: "U.S. Bureau of Economic Analysis (BEA)",
-          sourceUrl: snapshot.snapshotUrl,
-          sourceTier,
-          retrievedAt,
-          snapshot,
-          rows: body.rows,
-        });
-        break;
-      case "GDP_GROWTH_RATE":
-        written = await writeBeaGdpSnapshot({
-          tableId: "T10101",
-          lineCode: "1",
-          indicator: "GDP_GROWTH_RATE",
-          sourceName: "U.S. Bureau of Economic Analysis (BEA)",
-          sourceUrl: snapshot.snapshotUrl,
-          sourceTier,
-          retrievedAt,
-          snapshot,
-          rows: body.rows,
-        });
-        break;
-      case "FED_FUNDS_RATE":
-        written = await writeFedFundsSnapshot({
-          seriesId: "RIFSPFF_N.M",
-          indicator: "FED_FUNDS_RATE",
-          sourceName: "Federal Reserve Board (H.15)",
-          sourceUrl: snapshot.snapshotUrl,
-          sourceTier,
-          retrievedAt,
-          snapshot,
-          rows: body.rows,
-        });
-        break;
-    }
+    const written = await writeBlsNfpSnapshot({
+      seriesId: "CES0000000001",
+      indicator: "NFP",
+      sourceName: "U.S. Bureau of Labor Statistics (BLS)",
+      sourceUrl: snapshot.snapshotUrl,
+      sourceTier: "TIER_1_OFFICIAL",
+      retrievedAt,
+      snapshot,
+      rows: body.rows,
+    });
 
     return NextResponse.json({
       success: true,
