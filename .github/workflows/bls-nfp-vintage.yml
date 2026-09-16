@@ -32,4 +32,4 @@ jobs:
         run: npm install --no-audit --no-fund
 
       - name: Download, parse and publish latest BLS NFP vintage
-        run: node ../scripts/ingest-bls-nfp-vintage.mjs
+        run: node scripts/ingest-bls-nfp-vintage.mjs
