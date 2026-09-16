@@ -25,12 +25,34 @@ function monthNameToNumber(value) {
   return shortIndex >= 0 ? shortIndex + 1 : null;
 }
 
+function excelSerialToDate(value) {
+  if (typeof value !== "number" || !Number.isFinite(value)) return null;
+  if (value < 1 || value > 100000) return null;
+  const date = new Date(Date.UTC(1899, 11, 30) + Math.floor(value) * 86400000);
+  return Number.isNaN(date.getTime()) ? null : date;
+}
+
+function cleanDateLabel(value) {
+  return String(value)
+    .trim()
+    .replace(/\s*\([^)]*\)\s*$/g, "")
+    .replace(/\s*\[[^\]]*\]\s*$/g, "")
+    .replace(/\*/g, "")
+    .trim();
+}
+
 function parseObservationMonth(value) {
   if (value instanceof Date && !Number.isNaN(value.getTime())) {
     return `${value.getUTCFullYear()}-${pad(value.getUTCMonth() + 1)}`;
   }
-  if (typeof value !== "string" && typeof value !== "number") return null;
-  const text = String(value).trim();
+
+  if (typeof value === "number") {
+    const date = excelSerialToDate(value);
+    if (date) return `${date.getUTCFullYear()}-${pad(date.getUTCMonth() + 1)}`;
+  }
+
+  if (typeof value !== "string") return null;
+  const text = cleanDateLabel(value);
   if (!text) return null;
 
   let match = /^(\d{4})[-\/]([0-1]\d)$/.exec(text);
@@ -50,7 +72,7 @@ function parseObservationMonth(value) {
     if (month) return `${match[1]}-${pad(month)}`;
   }
 
-  match = /^([A-Za-z]{3})[-\/]?(\d{2})$/.exec(text);
+  match = /^([A-Za-z]{3,9})[-\/]?(\d{2})$/.exec(text);
   if (match) {
     const month = monthNameToNumber(match[1]);
     if (month) {
@@ -66,8 +88,14 @@ function parseReleaseDate(value) {
   if (value instanceof Date && !Number.isNaN(value.getTime())) {
     return value.toISOString().slice(0, 10);
   }
-  if (typeof value !== "string" && typeof value !== "number") return null;
-  const text = String(value).trim();
+
+  if (typeof value === "number") {
+    const date = excelSerialToDate(value);
+    if (date) return date.toISOString().slice(0, 10);
+  }
+
+  if (typeof value !== "string") return null;
+  const text = cleanDateLabel(value);
   if (!text) return null;
   const parsed = new Date(text);
   if (Number.isNaN(parsed.getTime())) return null;
@@ -85,13 +113,16 @@ function parseValue(value) {
 }
 
 function parseWorkbook(bytes) {
-  const workbook = XLSX.read(bytes, { type: "buffer", cellDates: true, raw: true });
+  // Use formatted cell text as well as raw values. BLS uses Excel-formatted
+  // month headers, and depending on workbook formatting SheetJS may otherwise
+  // expose those headers as Excel serial numbers instead of "Jan-39" labels.
+  const workbook = XLSX.read(bytes, { type: "buffer", cellDates: true, raw: false });
   const sheet = workbook.Sheets.Data;
   if (!sheet) throw new Error("BLS CES vintage workbook is missing the Data sheet.");
 
   const matrix = XLSX.utils.sheet_to_json(sheet, {
     header: 1,
-    raw: true,
+    raw: false,
     defval: null,
   });
   if (matrix.length < 4) throw new Error("BLS CES vintage Data sheet is too short.");
@@ -101,7 +132,7 @@ function parseWorkbook(bytes) {
   // XLSX parsing. Find the row containing the largest set of month headers.
   let headerRowIndex = -1;
   let columns = [];
-  const scanLimit = Math.min(matrix.length, 20);
+  const scanLimit = Math.min(matrix.length, 30);
 
   for (let rowIndex = 0; rowIndex < scanLimit; rowIndex += 1) {
     const row = matrix[rowIndex] ?? [];
@@ -117,7 +148,10 @@ function parseWorkbook(bytes) {
   }
 
   if (headerRowIndex < 0 || !columns.length) {
-    throw new Error("No observation-month columns found in BLS vintage workbook.");
+    const preview = (matrix.slice(0, 8) ?? [])
+      .map((row, index) => `${index}: ${(row ?? []).slice(0, 12).join(" | ")}`)
+      .join("\n");
+    throw new Error(`No observation-month columns found in BLS vintage workbook. Header preview:\n${preview}`);
   }
 
   const releases = new Map();
