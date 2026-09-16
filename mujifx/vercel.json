@@ -7,10 +7,6 @@
     {
       "path": "/api/sync/authoritative-p0-cron",
       "schedule": "15 13 * * *"
-    },
-    {
-      "path": "/api/sync/authoritative-vintage",
-      "schedule": "30 13 * * *"
     }
   ]
 }
