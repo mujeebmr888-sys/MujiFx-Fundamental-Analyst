@@ -52,7 +52,7 @@ function parseObservationMonth(value) {
   }
 
   if (typeof value !== "string") return null;
-  const text = cleanDateLabel(value);
+  const text = cleanDateLabel(value).replace(/_/g, "-");
   if (!text) return null;
 
   let match = /^(\d{4})[-\/]([0-1]\d)$/.exec(text);
@@ -97,6 +97,21 @@ function parseReleaseDate(value) {
   if (typeof value !== "string") return null;
   const text = cleanDateLabel(value);
   if (!text) return null;
+
+  // Some BLS vintage rows use month-year labels such as "May-03".
+  // Preserve those labels deterministically as the first calendar day of that month.
+  const monthYear = /^([A-Za-z]{3,9})[-\/]?(\d{2}|\d{4})$/.exec(text);
+  if (monthYear) {
+    const month = monthNameToNumber(monthYear[1]);
+    if (month) {
+      const rawYear = Number(monthYear[2]);
+      const year = monthYear[2].length === 2
+        ? (rawYear >= 30 ? 1900 + rawYear : 2000 + rawYear)
+        : rawYear;
+      if (year >= 1900 && year <= 2099) return `${year}-${pad(month)}-01`;
+    }
+  }
+
   const parsed = new Date(text);
   if (Number.isNaN(parsed.getTime())) return null;
   const iso = parsed.toISOString().slice(0, 10);
@@ -113,9 +128,8 @@ function parseValue(value) {
 }
 
 function parseWorkbook(bytes) {
-  // Use formatted cell text as well as raw values. BLS uses Excel-formatted
-  // month headers, and depending on workbook formatting SheetJS may otherwise
-  // expose those headers as Excel serial numbers instead of "Jan-39" labels.
+  // Use formatted cell text. The BLS workbook exposes reference months as
+  // labels such as Jan_39 when read through SheetJS in GitHub Actions.
   const workbook = XLSX.read(bytes, { type: "buffer", cellDates: true, raw: false });
   const sheet = workbook.Sheets.Data;
   if (!sheet) throw new Error("BLS CES vintage workbook is missing the Data sheet.");
@@ -127,9 +141,8 @@ function parseWorkbook(bytes) {
   });
   if (matrix.length < 4) throw new Error("BLS CES vintage Data sheet is too short.");
 
-  // BLS documents the reference-month headers on row 3, but the workbook can
-  // contain merged/title rows that change the exact zero-based position after
-  // XLSX parsing. Find the row containing the largest set of month headers.
+  // BLS documents the reference-month headers on row 3, but find them rather
+  // than relying on a fixed row in case workbook formatting changes.
   let headerRowIndex = -1;
   let columns = [];
   const scanLimit = Math.min(matrix.length, 30);
@@ -148,7 +161,8 @@ function parseWorkbook(bytes) {
   }
 
   if (headerRowIndex < 0 || !columns.length) {
-    const preview = (matrix.slice(0, 8) ?? [])
+    const preview = matrix
+      .slice(0, 8)
       .map((row, index) => `${index}: ${(row ?? []).slice(0, 12).join(" | ")}`)
       .join("\n");
     throw new Error(`No observation-month columns found in BLS vintage workbook. Header preview:\n${preview}`);
