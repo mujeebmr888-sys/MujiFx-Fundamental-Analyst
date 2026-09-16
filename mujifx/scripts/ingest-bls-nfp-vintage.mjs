@@ -97,7 +97,7 @@ function parseWorkbook(bytes) {
     const rows = [];
     for (const column of columns) {
       const value = parseValue(row[column.index]);
-      if (value !== null) rows.push({ observationDate: column.observationDate, releaseMonth, value });
+      if (value !== null) rows.push({ observationDate: `${column.observationDate}-01`, releaseMonth, value });
     }
     if (rows.length) releases.set(releaseMonth, rows);
   }
