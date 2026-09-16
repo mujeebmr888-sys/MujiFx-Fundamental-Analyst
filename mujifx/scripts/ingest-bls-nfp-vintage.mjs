@@ -66,8 +66,8 @@ function parseReleaseDate(value) {
   if (value instanceof Date && !Number.isNaN(value.getTime())) {
     return value.toISOString().slice(0, 10);
   }
-  if (typeof value !== "string") return null;
-  const text = value.trim();
+  if (typeof value !== "string" && typeof value !== "number") return null;
+  const text = String(value).trim();
   if (!text) return null;
   const parsed = new Date(text);
   if (Number.isNaN(parsed.getTime())) return null;
@@ -96,16 +96,32 @@ function parseWorkbook(bytes) {
   });
   if (matrix.length < 4) throw new Error("BLS CES vintage Data sheet is too short.");
 
-  const header = matrix[2] ?? [];
-  const columns = [];
-  for (let index = 1; index < header.length; index += 1) {
-    const observationDate = parseObservationMonth(header[index]);
-    if (observationDate) columns.push({ index, observationDate });
+  // BLS documents the reference-month headers on row 3, but the workbook can
+  // contain merged/title rows that change the exact zero-based position after
+  // XLSX parsing. Find the row containing the largest set of month headers.
+  let headerRowIndex = -1;
+  let columns = [];
+  const scanLimit = Math.min(matrix.length, 20);
+
+  for (let rowIndex = 0; rowIndex < scanLimit; rowIndex += 1) {
+    const row = matrix[rowIndex] ?? [];
+    const candidateColumns = [];
+    for (let index = 1; index < row.length; index += 1) {
+      const observationDate = parseObservationMonth(row[index]);
+      if (observationDate) candidateColumns.push({ index, observationDate });
+    }
+    if (candidateColumns.length > columns.length) {
+      columns = candidateColumns;
+      headerRowIndex = rowIndex;
+    }
   }
-  if (!columns.length) throw new Error("No observation-month columns found in BLS vintage workbook.");
+
+  if (headerRowIndex < 0 || !columns.length) {
+    throw new Error("No observation-month columns found in BLS vintage workbook.");
+  }
 
   const releases = new Map();
-  for (let rowIndex = 3; rowIndex < matrix.length; rowIndex += 1) {
+  for (let rowIndex = headerRowIndex + 1; rowIndex < matrix.length; rowIndex += 1) {
     const row = matrix[rowIndex] ?? [];
     const releaseDate = parseReleaseDate(row[0]);
     if (!releaseDate) continue;
