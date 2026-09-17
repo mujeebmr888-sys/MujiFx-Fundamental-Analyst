@@ -10,8 +10,14 @@ import {
   assertVintageEligible,
   type AuthoritativeVersionProvenance,
 } from "@/layers/data-acquisition/authoritative-version";
-import { saveVintageObservation } from "@/layers/historical-database/vintage-database";
-import { validateVersionedVintage, type VersionedVintageInput } from "@/layers/data-acquisition/sources/fred-vintage";
+import {
+  saveVintageObservation,
+  saveVintageObservations,
+} from "@/layers/historical-database/vintage-database";
+import {
+  validateVersionedVintage,
+  type VersionedVintageInput,
+} from "@/layers/data-acquisition/sources/fred-vintage";
 
 export interface AuthoritativeVintageInput
   extends Omit<VersionedVintageInput, "sourceVersion" | "realtimeStart"> {
@@ -20,14 +26,7 @@ export interface AuthoritativeVintageInput
   provenance: AuthoritativeVersionProvenance;
 }
 
-/**
- * Write one observation from an explicitly versioned authoritative source.
- *
- * For a published snapshot, the snapshot publication date is the point at
- * which that information set became available. It is kept separate from the
- * observation date and retrieval timestamp.
- */
-export async function writeAuthoritativeVintage(
+function toValidatedVintage(
   input: AuthoritativeVintageInput,
   context: string
 ) {
@@ -40,7 +39,7 @@ export async function writeAuthoritativeVintage(
     );
   }
 
-  const vintage = validateVersionedVintage({
+  return validateVersionedVintage({
     indicator: input.indicator,
     observationDate: input.observationDate,
     value: input.value,
@@ -53,6 +52,29 @@ export async function writeAuthoritativeVintage(
     sourceVersion: input.provenance.sourceVersion,
     realtimeEnd: input.realtimeEnd ?? null,
   });
+}
 
-  return saveVintageObservation(vintage);
+/**
+ * Write one observation from an explicitly versioned authoritative source.
+ */
+export async function writeAuthoritativeVintage(
+  input: AuthoritativeVintageInput,
+  context: string
+) {
+  return saveVintageObservation(toValidatedVintage(input, context));
+}
+
+/**
+ * Write many observations from an explicitly versioned authoritative source
+ * in one Supabase/Postgres RPC. This is the production path for large
+ * published snapshot tables such as the BLS NFP revisions triangle.
+ */
+export async function writeAuthoritativeVintageBatch(
+  inputs: AuthoritativeVintageInput[],
+  context: string
+) {
+  if (!inputs.length) return [];
+
+  const vintages = inputs.map((input) => toValidatedVintage(input, context));
+  return saveVintageObservations(vintages);
 }
