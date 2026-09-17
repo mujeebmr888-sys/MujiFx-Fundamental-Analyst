@@ -33,6 +33,11 @@ function assertDate(value: string): void {
   }
 }
 
+function observationMonthToDatabaseDate(value: string): string {
+  assertMonth(value);
+  return `${value}-01`;
+}
+
 function validateRows(rows: BlsNfpSnapshotRow[]): void {
   const seen = new Set<string>();
 
@@ -101,7 +106,7 @@ export async function writeBlsNfpSnapshot(
       await writeAuthoritativeVintage(
         {
           indicator: input.indicator,
-          observationDate: row.observationDate.trim(),
+          observationDate: observationMonthToDatabaseDate(row.observationDate.trim()),
           value: row.value,
           isMissing: row.isMissing ?? false,
           retrievedAt: input.retrievedAt,
