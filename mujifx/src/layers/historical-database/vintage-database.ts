@@ -56,6 +56,50 @@ export async function saveVintageObservation(vintage: VintageObservation) {
 }
 
 /**
+ * Save many authoritative vintage observations in one database RPC.
+ * This avoids one network round trip per observation while keeping the
+ * transactional vintage close/insert semantics inside Postgres.
+ */
+export async function saveVintageObservations(vintages: VintageObservation[]) {
+  if (!vintages.length) return [];
+  if (vintages.length > 5000) {
+    throw new Error("Vintage batch cannot exceed 5000 observations.");
+  }
+
+  for (const vintage of vintages) {
+    if (!vintage.sourceVersion?.trim()) {
+      throw new Error(
+        `Refusing to save vintage ${vintage.indicator}/${vintage.observationDate}: sourceVersion is required.`
+      );
+    }
+  }
+
+  const { data, error } = await supabaseAdmin.rpc(
+    "save_indicator_observation_vintage_batch",
+    {
+      p_rows: vintages.map((vintage) => ({
+        indicator: vintage.indicator,
+        observation_date: vintage.observationDate,
+        value: vintage.value,
+        is_missing: vintage.isMissing,
+        realtime_start: vintage.realtimeStart,
+        retrieved_at: vintage.retrievedAt,
+        source_name: vintage.sourceName,
+        source_url: vintage.sourceUrl,
+        source_tier: vintage.sourceTier,
+        source_version: vintage.sourceVersion.trim(),
+      })),
+    }
+  );
+
+  if (error) {
+    throw new Error(`Failed to save vintage batch: ${error.message}`);
+  }
+
+  return (data ?? []) as unknown[];
+}
+
+/**
  * Returns the single observation version that was officially available on
  * the requested as-of date. This is the core read path for point-in-time
  * analysis and deliberately does not fall back to the current/latest value.
