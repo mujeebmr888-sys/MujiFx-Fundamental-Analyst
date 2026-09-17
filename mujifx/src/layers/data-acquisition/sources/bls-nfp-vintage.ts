@@ -12,7 +12,7 @@ import {
   blsExplicitVintageProvenance,
   type BlsPublishedSnapshotDescriptor,
 } from "@/layers/data-acquisition/sources/bls-snapshot-provenance";
-import { writeAuthoritativeVintage } from "@/layers/historical-database/authoritative-vintage-writer";
+import { writeAuthoritativeVintageBatch } from "@/layers/historical-database/authoritative-vintage-writer";
 
 export interface BlsNfpSnapshotRow {
   observationDate: string;
@@ -94,32 +94,28 @@ export async function writeBlsNfpSnapshot(
   }
 
   validateRows(input.rows);
-  const results: unknown[] = [];
 
-  for (const row of input.rows) {
-    const provenance = blsExplicitVintageProvenance(
-      input.snapshot,
-      row.releaseDate.trim()
-    );
+  const authoritativeInputs = input.rows.map((row) => {
+    const releaseDate = row.releaseDate.trim();
+    const observationDate = observationMonthToDatabaseDate(row.observationDate.trim());
+    const provenance = blsExplicitVintageProvenance(input.snapshot, releaseDate);
 
-    results.push(
-      await writeAuthoritativeVintage(
-        {
-          indicator: input.indicator,
-          observationDate: observationMonthToDatabaseDate(row.observationDate.trim()),
-          value: row.value,
-          isMissing: row.isMissing ?? false,
-          retrievedAt: input.retrievedAt,
-          sourceName: input.sourceName,
-          sourceUrl: input.sourceUrl,
-          sourceTier: input.sourceTier,
-          provenance,
-          realtimeStart: row.releaseDate.trim(),
-        },
-        `BLS CES total nonfarm vintage ${input.snapshot.label} release ${row.releaseDate}`
-      )
-    );
-  }
+    return {
+      indicator: input.indicator,
+      observationDate,
+      value: row.value,
+      isMissing: row.isMissing ?? false,
+      retrievedAt: input.retrievedAt,
+      sourceName: input.sourceName,
+      sourceUrl: input.sourceUrl,
+      sourceTier: input.sourceTier,
+      provenance,
+      realtimeStart: releaseDate,
+    };
+  });
 
-  return results;
+  return writeAuthoritativeVintageBatch(
+    authoritativeInputs,
+    `BLS CES total nonfarm vintage ${input.snapshot.label}`
+  );
 }
