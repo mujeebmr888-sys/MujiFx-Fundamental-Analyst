@@ -205,7 +205,16 @@ function parseWorkbook(bytes) {
       if (observationDate) candidate.push({ index, observationDate });
     }
     if (candidate.length > observationColumns.length) {
-      observationColumns = candidate;
+      // The official Data sheet contains both employment levels and
+      // over-the-month changes. Both sections reuse the same reference-month
+      // headers, so keep the first occurrence of each month: the Total
+      // Nonfarm employment level series.
+      const seenMonths = new Set();
+      observationColumns = candidate.filter((column) => {
+        if (seenMonths.has(column.observationDate)) return false;
+        seenMonths.add(column.observationDate);
+        return true;
+      });
       headerRowIndex = rowIndex;
     }
   }
