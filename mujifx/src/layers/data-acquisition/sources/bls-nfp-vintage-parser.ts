@@ -101,7 +101,15 @@ export function parseBlsNfpVintageWorkbook(data: ArrayBuffer): ParsedBlsNfpRelea
       if (observationDate) candidate.push({ index, observationDate });
     }
     if (candidate.length > observationColumns.length) {
-      observationColumns = candidate;
+      // BLS publishes both employment levels and over-the-month changes in
+      // this workbook. Both sections reuse the same reference-month headers.
+      // Keep the first occurrence of each month: the Total Nonfarm level.
+      const seenMonths = new Set<string>();
+      observationColumns = candidate.filter((column) => {
+        if (seenMonths.has(column.observationDate)) return false;
+        seenMonths.add(column.observationDate);
+        return true;
+      });
       headerRow = rowIndex;
     }
   }
