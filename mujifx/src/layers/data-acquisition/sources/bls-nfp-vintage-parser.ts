@@ -4,7 +4,7 @@ import type { BlsNfpSnapshotRow } from "@/layers/data-acquisition/sources/bls-nf
 export const BLS_NFP_VINTAGE_URL = "https://www.bls.gov/web/empsit/cesvin00.xlsx";
 
 export interface ParsedBlsNfpRelease {
-  releaseDate: string;
+  releasePeriod: string;
   rows: BlsNfpSnapshotRow[];
 }
 
@@ -46,38 +46,29 @@ function parseObservationMonth(value: unknown): string | null {
     const month = monthNameToNumber(match[2]);
     if (month) return `${match[1]}-${pad(month)}`;
   }
-  match = /^([A-Za-z]{3,9})[-\/]?(\d{2})$/.exec(text);
-  if (match) {
-    const month = monthNameToNumber(match[1]);
-    if (month) {
-      const year = Number(match[2]);
-      return `${year >= 30 ? 1900 + year : 2000 + year}-${pad(month)}`;
-    }
-  }
   return null;
 }
 
-function parseReleaseDate(value: unknown): string | null {
-  if (value instanceof Date && !Number.isNaN(value.getTime())) return value.toISOString().slice(0, 10);
-  if (typeof value === "number") {
-    const date = excelDate(value);
-    return date ? date.toISOString().slice(0, 10) : null;
-  }
-  if (typeof value !== "string") return null;
-  const text = value.trim();
-  if (!text) return null;
-  const match = /^(?:[A-Za-z]+,?\s+)?([A-Za-z]+)\s+(\d{1,2}),\s+(\d{4})$/.exec(text);
-  if (match) {
-    const month = monthNameToNumber(match[1]);
-    if (month) {
-      const date = new Date(Date.UTC(Number(match[3]), month - 1, Number(match[2])));
-      if (!Number.isNaN(date.getTime())) return date.toISOString().slice(0, 10);
+function parseReleasePeriod(value: unknown): string | null {
+  if (value instanceof Date && !Number.isNaN(value.getTime())) return `${value.getUTCFullYear()}-${pad(value.getUTCMonth() + 1)}`;
+  if (typeof value === "string") {
+    const text = value.trim();
+    let match = /^([A-Za-z]+)[\s\/-]+(\d{4})/.exec(text);
+    if (match) {
+      const month = monthNameToNumber(match[1]);
+      if (month) return `${match[2]}-${pad(month)}`;
+    }
+    match = /^(\d{4})[\s\/-]+([A-Za-z]+)/.exec(text);
+    if (match) {
+      const month = monthNameToNumber(match[2]);
+      if (month) return `${match[1]}-${pad(month)}`;
     }
   }
-  const parsed = new Date(text);
-  if (Number.isNaN(parsed.getTime())) return null;
-  const iso = parsed.toISOString().slice(0, 10);
-  return /^20\d{2}-\d{2}-\d{2}$/.test(iso) ? iso : null;
+  if (typeof value === "number") {
+    const date = excelDate(value);
+    return date ? `${date.getUTCFullYear()}-${pad(date.getUTCMonth() + 1)}` : null;
+  }
+  return null;
 }
 
 function parseValue(value: unknown): number | null {
@@ -97,46 +88,52 @@ export function parseBlsNfpVintageWorkbook(data: ArrayBuffer): ParsedBlsNfpRelea
   const matrix = XLSX.utils.sheet_to_json<unknown[]>(sheet, { header: 1, raw: true, defval: null });
   if (matrix.length < 4) throw new Error("BLS CES vintage Data sheet does not contain enough rows.");
 
-  // BLS CES vintage layout: release dates are column headers; observation months are column A.
-  let releaseHeaderRow = -1;
-  let releaseColumns: Array<{ index: number; releaseDate: string }> = [];
+  // Official BLS layout: column A identifies the Employment Situation release;
+  // columns B+ are reference months. The vintage value is at the intersection.
+  let headerRow = -1;
+  let observationColumns: Array<{ index: number; observationDate: string }> = [];
 
   for (let rowIndex = 0; rowIndex < Math.min(matrix.length, 10); rowIndex += 1) {
     const row = matrix[rowIndex] ?? [];
-    const candidate: Array<{ index: number; releaseDate: string }> = [];
+    const candidate: Array<{ index: number; observationDate: string }> = [];
     for (let index = 1; index < row.length; index += 1) {
-      const releaseDate = parseReleaseDate(row[index]);
-      if (releaseDate) candidate.push({ index, releaseDate });
+      const observationDate = parseObservationMonth(row[index]);
+      if (observationDate) candidate.push({ index, observationDate });
     }
-    if (candidate.length > releaseColumns.length) {
-      releaseColumns = candidate;
-      releaseHeaderRow = rowIndex;
+    if (candidate.length > observationColumns.length) {
+      observationColumns = candidate;
+      headerRow = rowIndex;
     }
   }
 
-  if (releaseHeaderRow < 0 || !releaseColumns.length) {
-    throw new Error("BLS CES vintage Data sheet contains no recognizable release-date columns.");
+  if (headerRow < 0 || !observationColumns.length) {
+    throw new Error("BLS CES vintage Data sheet contains no recognizable reference-month columns.");
   }
 
   const releases = new Map<string, BlsNfpSnapshotRow[]>();
 
-  for (let rowIndex = releaseHeaderRow + 1; rowIndex < matrix.length; rowIndex += 1) {
+  for (let rowIndex = headerRow + 1; rowIndex < matrix.length; rowIndex += 1) {
     const row = matrix[rowIndex] ?? [];
-    const observationDate = parseObservationMonth(row[0]);
-    if (!observationDate) continue;
+    const releasePeriod = parseReleasePeriod(row[0]);
+    if (!releasePeriod) continue;
 
-    for (const column of releaseColumns) {
+    for (const column of observationColumns) {
       const value = parseValue(row[column.index]);
       if (value === null) continue;
-      const rows = releases.get(column.releaseDate) ?? [];
-      rows.push({ observationDate, releaseDate: column.releaseDate, value });
-      releases.set(column.releaseDate, rows);
+
+      const rows = releases.get(releasePeriod) ?? [];
+      rows.push({
+        observationDate: column.observationDate,
+        releaseDate: releasePeriod,
+        value,
+      });
+      releases.set(releasePeriod, rows);
     }
   }
 
   const result = [...releases.entries()]
     .sort(([left], [right]) => left.localeCompare(right))
-    .map(([releaseDate, rows]) => ({ releaseDate, rows }));
+    .map(([releasePeriod, rows]) => ({ releasePeriod, rows }));
 
   if (!result.length) throw new Error("BLS CES vintage Data sheet contains no release snapshots with numeric NFP observations.");
   return result;
