@@ -46,6 +46,29 @@ function parseIsoDate(value: string, field: string): Date {
   return parsed;
 }
 
+async function resolveOfficialNfpReleaseDate(releasePeriod: string): Promise<string> {
+  const year = releasePeriod.slice(0, 4);
+  const response = await fetch("https://www.bls.gov/schedule/" + year + "/home.htm", {
+    cache: "no-store",
+    headers: {
+      Accept: "text/html,application/xhtml+xml",
+      "User-Agent": "MujiFx-Fundamental-Analyst/1.0 (BLS public-data ingestion)",
+    },
+    signal: AbortSignal.timeout(15_000),
+  });
+  if (!response.ok) throw new Error("BLS " + year + " release schedule failed with HTTP " + response.status + ".");
+  const html = await response.text();
+  const text = html.replace(/<[^>]*>/g, " ").replace(/&nbsp;/gi, " ").replace(/\s+/g, " ");
+  const monthNames = ["january","february","march","april","may","june","july","august","september","october","november","december"];
+  const month = monthNames[Number(releasePeriod.slice(5, 7)) - 1];
+  const pattern = new RegExp("The Employment Situation,\\s*" + month + "\\s+" + year + "\\s+([A-Za-z]+\\.?\\s+\\d{1,2}(?:,\\s*\\d{4})?)", "i");
+  const match = pattern.exec(text);
+  if (!match) throw new Error("No official BLS Employment Situation release date found for " + releasePeriod + ".");
+  const normalized = match[1].replace(/Jan\./i,"January").replace(/Feb\./i,"February").replace(/Mar\./i,"March").replace(/Apr\./i,"April").replace(/Aug\./i,"August").replace(/Sept\./i,"September").replace(/Oct\./i,"October").replace(/Nov\./i,"November").replace(/Dec\./i,"December");
+  const date = new Date(/,\s*\d{4}$/.test(normalized) ? normalized : normalized + ", " + year);
+  if (Number.isNaN(date.getTime())) throw new Error("Invalid official BLS release date for " + releasePeriod + ": " + match[1]);
+  return date.toISOString().slice(0, 10);
+}
 function assertOfficialSnapshotUrl(snapshotUrl: string): void {
   let parsed: URL;
   try {
@@ -202,13 +225,16 @@ async function ingestLatestBlsNfpVintage() {
     throw new Error(`Latest BLS NFP release contains ${rows.length} rows; limit is ${MAX_ROWS}.`);
   }
 
+  const releaseDate = await resolveOfficialNfpReleaseDate(latest.releasePeriod);
+  const normalizedRows = rows.map((row) => ({ ...row, releaseDate }));
+
   const snapshot = {
     snapshotUrl: BLS_NFP_VINTAGE_URL,
     publicationDate,
     label: "BLS CES Total Nonfarm Vintage Data",
   };
 
-  validateBody({ kind: "NFP", snapshot, rows });
+  validateBody({ kind: "NFP", snapshot, rows: normalizedRows });
 
   const written = await writeBlsNfpSnapshot({
     seriesId: "CES0000000001",
@@ -218,12 +244,12 @@ async function ingestLatestBlsNfpVintage() {
     sourceTier: "TIER_1_OFFICIAL",
     retrievedAt: new Date().toISOString(),
     snapshot,
-    rows,
+    rows: normalizedRows,
   });
 
   return {
     kind: "NFP" as const,
-    releaseDate: latest.releasePeriod,
+    releaseDate,
     snapshot,
     releasesAvailable: releases.length,
     rowsReceived: rows.length,
