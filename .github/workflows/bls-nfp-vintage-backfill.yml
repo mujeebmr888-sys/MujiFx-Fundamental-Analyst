@@ -4,6 +4,7 @@ on:
   push:
     paths:
       - "mujifx/scripts/backfill-bls-nfp-vintage.mjs"
+  workflow_dispatch:
 
 permissions:
   contents: read
