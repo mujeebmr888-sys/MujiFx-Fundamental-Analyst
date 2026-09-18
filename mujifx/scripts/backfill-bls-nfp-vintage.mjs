@@ -212,7 +212,7 @@ if (!bytes.length) throw new Error("BLS vintage download was empty.");
 const releases = parseWorkbook(bytes);
 if (!releases.length) throw new Error("No eligible BLS NFP vintage releases found.");
 
-const years = [...new Set(releases.map(({ releasePeriod }) => Number(releasePeriod.slice(0, 4)))];
+const years = [...new Set(releases.map(({ releasePeriod }) => Number(releasePeriod.slice(0, 4))))];
 const schedules = new Map();
 for (const year of years) {
   const schedule = await loadReleaseSchedule(year);
