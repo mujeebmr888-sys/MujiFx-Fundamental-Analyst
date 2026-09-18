@@ -107,48 +107,59 @@ async function loadReleaseSchedule(year) {
   if (!response.ok) throw new Error(`BLS ${year} release schedule failed with HTTP ${response.status}.`);
   const html = await response.text();
   const schedule = new Map();
-  const rowMatches = html.match(/<tr\b[\s\S]*?<\/tr>/gi) ?? [];
 
-  for (const rawRow of rowMatches) {
-    const rowText = rawRow
-      .replace(/<[^>]*>/g, " ")
-      .replace(/&nbsp;/gi, " ")
-      .replace(/&amp;/gi, "&")
-      .replace(/\s+/g, " ")
-      .trim();
+  const clean = html
+    .replace(/<script[\\s\\S]*?<\\/script>/gi, " ")
+    .replace(/<style[\\s\\S]*?<\\/style>/gi, " ")
+    .replace(/<[^>]*>/g, " ")
+    .replace(/&nbsp;/gi, " ")
+    .replace(/&amp;/gi, "&")
+    .replace(/\\s+/g, " ")
+    .trim();
 
-    // BLS archived annual schedules use the structure:
-    // "... Friday, January 04, 2008 ... Employment Situation for December 2007"
-    // Older parser logic incorrectly assumed the release title came first.
-    const releaseMatch = /Employment Situation\s+(?:for\s+|,\s*)([A-Za-z]+)\s+(\d{4})/i.exec(rowText);
-    if (!releaseMatch) continue;
+  // Archived BLS schedules have used both:
+  //   "The Employment Situation, May 2003   June 6"
+  // and
+  //   "Employment Situation for December 2007   January 4, 2008".
+  // Parse the release title and a nearby calendar date without assuming
+  // which side of the title contains the date.
+  const monthPattern = "(?:Jan(?:uary)?\\.?|Feb(?:ruary)?\\.?|Mar(?:ch)?\\.?|Apr(?:il)?\\.?|May|June|July|Aug(?:ust)?\\.?|Sept?(?:ember)?\\.?|Oct(?:ober)?\\.?|Nov(?:ember)?\\.?|Dec(?:ember)?\\.?)";
+  const titlePatterns = [
+    new RegExp(`(?:The )?Employment Situation,\\s*([A-Za-z]+)\\s+(\\d{4})\\s+([^]{0,180}?)`, "gi"),
+    new RegExp(`(?:The )?Employment Situation\\s+for\\s+([A-Za-z]+)\\s+(\\d{4})\\s+([^]{0,180}?)`, "gi"),
+  ];
 
-    const releasePeriod = parseObservationMonth(`${releaseMatch[1]} ${releaseMatch[2]}`);
-    if (!releasePeriod) continue;
-
-    const beforeRelease = rowText.slice(0, releaseMatch.index ?? 0);
-    const afterRelease = rowText.slice((releaseMatch.index ?? 0) + releaseMatch[0].length);
-    const releaseDate = parseScheduleDate(beforeRelease, year) ?? parseScheduleDate(afterRelease, year);
-    if (releaseDate) schedule.set(releasePeriod, releaseDate);
-  }
-
-  if (!schedule.size) {
-    const compact = html
-      .replace(/<[^>]*>/g, " ")
-      .replace(/&nbsp;/gi, " ")
-      .replace(/&amp;/gi, "&")
-      .replace(/\s+/g, " ");
-
-    const fallbackPattern = /((?:Jan(?:uary)?\.|Feb(?:ruary)?\.|Mar(?:ch)?\.|Apr(?:il)?\.|May|June|July|Aug(?:ust)?\.|Sept?(?:ember)?\.|Oct(?:ober)?\.|Nov(?:ember)?\.|Dec(?:ember)?\.)\s+\d{1,2},?\s*\d{0,4})[^<]{0,300}?Employment Situation\s+(?:for\s+|,\s*)([A-Za-z]+)\s+(\d{4})/gi;
+  for (const pattern of titlePatterns) {
     let match;
-    while ((match = fallbackPattern.exec(compact)) !== null) {
-      const releasePeriod = parseObservationMonth(`${match[2]} ${match[3]}`);
-      const releaseDate = parseScheduleDate(match[1], year);
-      if (releasePeriod && releaseDate) schedule.set(releasePeriod, releaseDate);
+    while ((match = pattern.exec(clean)) !== null) {
+      const releasePeriod = parseObservationMonth(`${match[1]} ${match[2]}`);
+      if (!releasePeriod) continue;
+
+      const dateMatch = new RegExp(`(${monthPattern})\\s+\\d{1,2}(?:,\\s*\\d{4})?`).exec(match[3]);
+      if (!dateMatch) continue;
+
+      const releaseDate = parseScheduleDate(dateMatch[0], year);
+      if (releaseDate) schedule.set(releasePeriod, releaseDate);
     }
   }
 
-  if (!schedule.size) throw new Error(`BLS ${year} release schedule contained no Employment Situation dates.`);
+  // A second pass handles layouts where the release date appears before the
+  // title (common in some archived schedules).
+  const reversePattern = new RegExp(
+    `(${monthPattern})\\s+\\d{1,2}(?:,\\s*\\d{4})?[^]{0,180}?(?:The )?Employment Situation(?:,|\\s+for)\\s*([A-Za-z]+)\\s+(\\d{4})`,
+    "gi",
+  );
+  let reverseMatch;
+  while ((reverseMatch = reversePattern.exec(clean)) !== null) {
+    const releasePeriod = parseObservationMonth(`${reverseMatch[2]} ${reverseMatch[3]}`);
+    const releaseDate = parseScheduleDate(reverseMatch[1], year);
+    if (releasePeriod && releaseDate) schedule.set(releasePeriod, releaseDate);
+  }
+
+  if (!schedule.size) {
+    throw new Error(`BLS ${year} release schedule contained no Employment Situation dates.`);
+  }
+
   return schedule;
 }
 
