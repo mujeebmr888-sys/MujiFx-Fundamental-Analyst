@@ -112,7 +112,7 @@ async function loadReleaseSchedule(year) {
   // Parse each HTML table row independently. This prevents dates from
   // neighboring releases being accidentally associated with an Employment
   // Situation month (the old parser searched up to 900 characters ahead).
-  const rowMatches = html.match(/<tr\\b[\\s\\S]*?<\\/tr>/gi) ?? [];
+  const rowMatches = html.match(/<tr\b[\s\S]*?<\/tr>/gi) ?? [];
   for (const rawRow of rowMatches) {
     const rowText = rawRow
       .replace(/<[^>]*>/g, " ")
