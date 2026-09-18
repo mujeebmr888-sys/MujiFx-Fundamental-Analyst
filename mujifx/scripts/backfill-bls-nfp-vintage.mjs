@@ -133,26 +133,6 @@ function extractBlsTableRows(html) {
   return rows;
 }
 
-function parseScheduleDate(text, year) {
-  const match = /(?:Jan(?:uary)?\.?|Feb(?:ruary)?\.?|Mar(?:ch)?\.?|Apr(?:il)?\.?|May|June|July|Aug(?:ust)?\.?|Sept?(?:ember)?\.?|Oct(?:ober)?\.?|Nov(?:ember)?\.?|Dec(?:ember)?\.?)\s+\d{1,2}(?:,\s*\d{4})?/i.exec(text);
-  if (!match) return null;
-
-  const normalized = match[0]
-    .replace(/^Jan(?:uary)?\./i, "January")
-    .replace(/^Feb(?:ruary)?\./i, "February")
-    .replace(/^Mar(?:ch)?\./i, "March")
-    .replace(/^Apr(?:il)?\./i, "April")
-    .replace(/^Aug(?:ust)?\./i, "August")
-    .replace(/^Sept?(?:ember)?\./i, "September")
-    .replace(/^Oct(?:ober)?\./i, "October")
-    .replace(/^Nov(?:ember)?\./i, "November")
-    .replace(/^Dec(?:ember)?\./i, "December");
-
-  const withYear = /,\s*\d{4}$/.test(normalized) ? normalized : normalized + ", " + year;
-  const date = new Date(withYear);
-  return Number.isNaN(date.getTime()) ? null : date.toISOString().slice(0, 10);
-}
-
 function parseScheduleTitle(text) {
   const match = /(?:The\s+)?Employment\s+Situation(?:,|\s+for)\s*([A-Za-z]+)\s+(\d{4})/i.exec(text);
   if (!match) return null;
