@@ -102,8 +102,8 @@ function parseScheduleDate(text, year) {
   return Number.isNaN(date.getTime()) ? null : date.toISOString().slice(0, 10);
 }
 
-function cleanBlsHtml(html) {
-  return html
+function cleanBlsCell(value) {
+  return value
     .replace(/<script[\s\S]*?<\/script>/gi, " ")
     .replace(/<style[\s\S]*?<\/style>/gi, " ")
     .replace(/<[^>]*>/g, " ")
@@ -113,6 +113,50 @@ function cleanBlsHtml(html) {
     .replace(/&quot;/gi, '"')
     .replace(/\s+/g, " ")
     .trim();
+}
+
+function extractBlsTableRows(html) {
+  const rows = [];
+  const rowPattern = /<tr\b[^>]*>([\s\S]*?)<\/tr>/gi;
+  let rowMatch;
+
+  while ((rowMatch = rowPattern.exec(html)) !== null) {
+    const cells = [];
+    const cellPattern = /<t[dh]\b[^>]*>([\s\S]*?)<\/t[dh]>/gi;
+    let cellMatch;
+    while ((cellMatch = cellPattern.exec(rowMatch[1])) !== null) {
+      cells.push(cleanBlsCell(cellMatch[1]));
+    }
+    if (cells.length) rows.push(cells);
+  }
+
+  return rows;
+}
+
+function parseScheduleDate(text, year) {
+  const match = /(?:Jan(?:uary)?\.?|Feb(?:ruary)?\.?|Mar(?:ch)?\.?|Apr(?:il)?\.?|May|June|July|Aug(?:ust)?\.?|Sept?(?:ember)?\.?|Oct(?:ober)?\.?|Nov(?:ember)?\.?|Dec(?:ember)?\.?)\s+\d{1,2}(?:,\s*\d{4})?/i.exec(text);
+  if (!match) return null;
+
+  const normalized = match[0]
+    .replace(/^Jan(?:uary)?\./i, "January")
+    .replace(/^Feb(?:ruary)?\./i, "February")
+    .replace(/^Mar(?:ch)?\./i, "March")
+    .replace(/^Apr(?:il)?\./i, "April")
+    .replace(/^Aug(?:ust)?\./i, "August")
+    .replace(/^Sept?(?:ember)?\./i, "September")
+    .replace(/^Oct(?:ober)?\./i, "October")
+    .replace(/^Nov(?:ember)?\./i, "November")
+    .replace(/^Dec(?:ember)?\./i, "December");
+
+  const withYear = /,\s*\d{4}$/.test(normalized) ? normalized : normalized + ", " + year;
+  const date = new Date(withYear);
+  return Number.isNaN(date.getTime()) ? null : date.toISOString().slice(0, 10);
+}
+
+function parseScheduleTitle(text) {
+  const match = /(?:The\s+)?Employment\s+Situation(?:,|\s+for)\s*([A-Za-z]+)\s+(\d{4})/i.exec(text);
+  if (!match) return null;
+  return parseObservationMonth(match[1] + " " + match[2]);
 }
 
 async function loadReleaseSchedule(year) {
@@ -125,26 +169,34 @@ async function loadReleaseSchedule(year) {
   if (!response.ok) throw new Error("BLS " + year + " release schedule failed with HTTP " + response.status + ".");
 
   const html = await response.text();
-  const clean = cleanBlsHtml(html);
   const schedule = new Map();
 
-  // BLS has used several historical schedule layouts. Parse the actual
-  // Employment Situation title and a nearby calendar date.
-  const title = /(?:The )?Employment Situation(?:,|\s+for)\s*([A-Za-z]+)\s+(\d{4})/gi;
-  let match;
-
-  while ((match = title.exec(clean)) !== null) {
-    const releasePeriod = parseObservationMonth(match[1] + " " + match[2]);
+  // Prefer table-row parsing. Historical BLS schedule pages changed HTML
+  // layouts, but the Employment Situation title and its publication date
+  // remain in the same schedule row.
+  for (const cells of extractBlsTableRows(html)) {
+    const joined = cells.join(" | ");
+    const releasePeriod = parseScheduleTitle(joined);
     if (!releasePeriod) continue;
 
-    const before = clean.slice(Math.max(0, match.index - 120), match.index);
-    const after = clean.slice(match.index + match[0].length, match.index + match[0].length + 220);
-
-    const afterDate = parseScheduleDate(after, year);
-    const beforeDate = parseScheduleDate(before, year);
-    const releaseDate = afterDate || beforeDate;
-
+    const releaseDate = parseScheduleDate(cells.join(" "), year);
     if (releaseDate) schedule.set(releasePeriod, releaseDate);
+  }
+
+  // Fallback for pages where the schedule is not rendered as a table.
+  if (!schedule.size) {
+    const clean = cleanBlsCell(html);
+    const title = /(?:The\s+)?Employment\s+Situation(?:,|\s+for)\s*([A-Za-z]+)\s+(\d{4})/gi;
+    let match;
+
+    while ((match = title.exec(clean)) !== null) {
+      const releasePeriod = parseObservationMonth(match[1] + " " + match[2]);
+      if (!releasePeriod) continue;
+
+      const window = clean.slice(Math.max(0, match.index - 160), match.index + match[0].length + 260);
+      const releaseDate = parseScheduleDate(window, year);
+      if (releaseDate) schedule.set(releasePeriod, releaseDate);
+    }
   }
 
   if (!schedule.size) {
