@@ -83,81 +83,72 @@ function numeric(value) {
 }
 
 function parseScheduleDate(text, year) {
-  const match = /(?:Jan(?:uary)?\.|Feb(?:ruary)?\.|Mar(?:ch)?\.|Apr(?:il)?\.|May|June|July|Aug(?:ust)?\.|Sept?(?:ember)?\.|Oct(?:ober)?\.|Nov(?:ember)?\.|Dec(?:ember)?\.)\s+\d{1,2}(?:,\s*\d{4})?/.exec(text);
+  const match = /(?:Jan(?:uary)?\.?|Feb(?:ruary)?\.?|Mar(?:ch)?\.?|Apr(?:il)?\.?|May|June|July|Aug(?:ust)?\.?|Sept?(?:ember)?\.?|Oct(?:ober)?\.?|Nov(?:ember)?\.?|Dec(?:ember)?\.?)\s+\d{1,2}(?:,\s*\d{4})?/i.exec(text);
   if (!match) return null;
+
   const normalized = match[0]
-    .replace(/Jan(?:uary)?\./i, "January")
-    .replace(/Feb(?:ruary)?\./i, "February")
-    .replace(/Mar(?:ch)?\./i, "March")
-    .replace(/Apr(?:il)?\./i, "April")
-    .replace(/Aug(?:ust)?\./i, "August")
-    .replace(/Sept?(?:ember)?\./i, "September")
-    .replace(/Oct(?:ober)?\./i, "October")
-    .replace(/Nov(?:ember)?\./i, "November")
-    .replace(/Dec(?:ember)?\./i, "December");
-  const withYear = /,\s*(\d{4})$/.test(normalized) ? normalized : `${normalized}, ${year}`;
+    .replace(/^Jan(?:uary)?\./i, "January")
+    .replace(/^Feb(?:ruary)?\./i, "February")
+    .replace(/^Mar(?:ch)?\./i, "March")
+    .replace(/^Apr(?:il)?\./i, "April")
+    .replace(/^Aug(?:ust)?\./i, "August")
+    .replace(/^Sept?(?:ember)?\./i, "September")
+    .replace(/^Oct(?:ober)?\./i, "October")
+    .replace(/^Nov(?:ember)?\./i, "November")
+    .replace(/^Dec(?:ember)?\./i, "December");
+
+  const withYear = /,\s*\d{4}$/.test(normalized) ? normalized : normalized + ", " + year;
   const date = new Date(withYear);
   return Number.isNaN(date.getTime()) ? null : date.toISOString().slice(0, 10);
 }
 
-async function loadReleaseSchedule(year) {
-  const response = await fetch(`${BLS_SCHEDULE_BASE}/${year}/home.htm`, {
-    headers: { "User-Agent": "MujiFx-Fundamental-Analyst/1.0 (BLS public-data ingestion)", Accept: "text/html,application/xhtml+xml" },
-  });
-  if (!response.ok) throw new Error(`BLS ${year} release schedule failed with HTTP ${response.status}.`);
-  const html = await response.text();
-  const schedule = new Map();
-
-  const clean = html
-    .replace(/<script[\\s\\S]*?<\\/script>/gi, " ")
-    .replace(/<style[\\s\\S]*?<\\/style>/gi, " ")
+function cleanBlsHtml(html) {
+  return html
+    .replace(/<script[\s\S]*?<\/script>/gi, " ")
+    .replace(/<style[\s\S]*?<\/style>/gi, " ")
     .replace(/<[^>]*>/g, " ")
     .replace(/&nbsp;/gi, " ")
     .replace(/&amp;/gi, "&")
-    .replace(/\\s+/g, " ")
+    .replace(/&#39;/gi, "'")
+    .replace(/&quot;/gi, '"')
+    .replace(/\s+/g, " ")
     .trim();
+}
 
-  // Archived BLS schedules have used both:
-  //   "The Employment Situation, May 2003   June 6"
-  // and
-  //   "Employment Situation for December 2007   January 4, 2008".
-  // Parse the release title and a nearby calendar date without assuming
-  // which side of the title contains the date.
-  const monthPattern = "(?:Jan(?:uary)?\\.?|Feb(?:ruary)?\\.?|Mar(?:ch)?\\.?|Apr(?:il)?\\.?|May|June|July|Aug(?:ust)?\\.?|Sept?(?:ember)?\\.?|Oct(?:ober)?\\.?|Nov(?:ember)?\\.?|Dec(?:ember)?\\.?)";
-  const titlePatterns = [
-    new RegExp(`(?:The )?Employment Situation,\\s*([A-Za-z]+)\\s+(\\d{4})\\s+([^]{0,180}?)`, "gi"),
-    new RegExp(`(?:The )?Employment Situation\\s+for\\s+([A-Za-z]+)\\s+(\\d{4})\\s+([^]{0,180}?)`, "gi"),
-  ];
+async function loadReleaseSchedule(year) {
+  const response = await fetch(BLS_SCHEDULE_BASE + "/" + year + "/home.htm", {
+    headers: {
+      "User-Agent": "MujiFx-Fundamental-Analyst/1.0 (BLS public-data ingestion)",
+      Accept: "text/html,application/xhtml+xml",
+    },
+  });
+  if (!response.ok) throw new Error("BLS " + year + " release schedule failed with HTTP " + response.status + ".");
 
-  for (const pattern of titlePatterns) {
-    let match;
-    while ((match = pattern.exec(clean)) !== null) {
-      const releasePeriod = parseObservationMonth(`${match[1]} ${match[2]}`);
-      if (!releasePeriod) continue;
+  const html = await response.text();
+  const clean = cleanBlsHtml(html);
+  const schedule = new Map();
 
-      const dateMatch = new RegExp(`(${monthPattern})\\s+\\d{1,2}(?:,\\s*\\d{4})?`).exec(match[3]);
-      if (!dateMatch) continue;
+  // BLS has used several historical schedule layouts. Parse the actual
+  // Employment Situation title and a nearby calendar date.
+  const title = /(?:The )?Employment Situation(?:,|\s+for)\s*([A-Za-z]+)\s+(\d{4})/gi;
+  let match;
 
-      const releaseDate = parseScheduleDate(dateMatch[0], year);
-      if (releaseDate) schedule.set(releasePeriod, releaseDate);
-    }
-  }
+  while ((match = title.exec(clean)) !== null) {
+    const releasePeriod = parseObservationMonth(match[1] + " " + match[2]);
+    if (!releasePeriod) continue;
 
-  // A second pass handles layouts where the release date appears before the
-  // title (common in some archived schedules).
-  const reversePattern = new RegExp(
-    `(${monthPattern})\\s+\\d{1,2}(?:,\\s*\\d{4})?[^]{0,180}?(?:The )?Employment Situation(?:,|\\s+for)\\s*([A-Za-z]+)\\s+(\\d{4})`,
-    "gi",
-  );
-  let reverseMatch;
-  while ((reverseMatch = reversePattern.exec(clean)) !== null) {
-    const releasePeriod = parseObservationMonth(`${reverseMatch[2]} ${reverseMatch[3]}`);
-    const releaseDate = parseScheduleDate(reverseMatch[1], year);
-    if (releasePeriod && releaseDate) schedule.set(releasePeriod, releaseDate);
+    const before = clean.slice(Math.max(0, match.index - 120), match.index);
+    const after = clean.slice(match.index + match[0].length, match.index + match[0].length + 220);
+
+    const afterDate = parseScheduleDate(after, year);
+    const beforeDate = parseScheduleDate(before, year);
+    const releaseDate = afterDate || beforeDate;
+
+    if (releaseDate) schedule.set(releasePeriod, releaseDate);
   }
 
   if (!schedule.size) {
-    throw new Error(`BLS ${year} release schedule contained no Employment Situation dates.`);
+    throw new Error("BLS " + year + " release schedule contained no Employment Situation dates.");
   }
 
   return schedule;
