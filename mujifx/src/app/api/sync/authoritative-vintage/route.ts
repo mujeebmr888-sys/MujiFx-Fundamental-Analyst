@@ -223,7 +223,7 @@ async function ingestLatestBlsNfpVintage() {
 
   return {
     kind: "NFP" as const,
-    releaseDate: latest.releaseDate,
+    releaseDate: latest.releasePeriod,
     snapshot,
     releasesAvailable: releases.length,
     rowsReceived: rows.length,
