@@ -84,19 +84,19 @@ function numeric(value) {
 }
 
 function parseScheduleDate(text, year) {
-  const match = /(?:Jan\.|Feb\.|Mar\.|Apr\.|May|June|July|Aug\.|Sept\.|Oct\.|Nov\.|Dec\.)\s+\d{1,2}(?:,\s*\d{4})?/.exec(text);
+  const match = /(?:Jan\\.|Feb\\.|Mar\\.|Apr\\.|May|June|July|Aug\\.|Sept\\.|Oct\\.|Nov\\.|Dec\\.)\\s+\\d{1,2}(?:,\\s*\\d{4})?/.exec(text);
   if (!match) return null;
   const normalized = match[0]
-    .replace(/Jan\./, "January")
-    .replace(/Feb\./, "February")
-    .replace(/Mar\./, "March")
-    .replace(/Apr\./, "April")
-    .replace(/Aug\./, "August")
-    .replace(/Sept\./, "September")
-    .replace(/Oct\./, "October")
-    .replace(/Nov\./, "November")
-    .replace(/Dec\./, "December");
-  const withYear = /,\s*(\d{4})$/.test(normalized) ? normalized : `${normalized}, ${year}`;
+    .replace(/Jan\\./, "January")
+    .replace(/Feb\\./, "February")
+    .replace(/Mar\\./, "March")
+    .replace(/Apr\\./, "April")
+    .replace(/Aug\\./, "August")
+    .replace(/Sept\\./, "September")
+    .replace(/Oct\\./, "October")
+    .replace(/Nov\\./, "November")
+    .replace(/Dec\\./, "December");
+  const withYear = /,\\s*(\\d{4})$/.test(normalized) ? normalized : `${normalized}, ${year}`;
   const date = new Date(withYear);
   return Number.isNaN(date.getTime()) ? null : date.toISOString().slice(0, 10);
 }
@@ -107,23 +107,40 @@ async function loadReleaseSchedule(year) {
   });
   if (!response.ok) throw new Error(`BLS ${year} release schedule failed with HTTP ${response.status}.`);
   const html = await response.text();
-  const text = html.replace(/<[^>]*>/g, " ").replace(/&nbsp;/gi, " ");
   const schedule = new Map();
 
-  // The schedule is a table with release name and date in the same row.
-  const rowPattern = /The Employment Situation,\s*([A-Za-z]+)\s+(\d{4})([\s\S]{0,900}?)(?=The Employment Situation,|$)/g;
-  let match;
-  while ((match = rowPattern.exec(text)) !== null) {
-    const releasePeriod = parseObservationMonth(`${match[1]} ${match[2]}`);
+  // Parse each HTML table row independently. This prevents dates from
+  // neighboring releases being accidentally associated with an Employment
+  // Situation month (the old parser searched up to 900 characters ahead).
+  const rowMatches = html.match(/<tr\\b[\\s\\S]*?<\\/tr>/gi) ?? [];
+  for (const rawRow of rowMatches) {
+    const rowText = rawRow
+      .replace(/<[^>]*>/g, " ")
+      .replace(/&nbsp;/gi, " ")
+      .replace(/&amp;/gi, "&")
+      .replace(/\\s+/g, " ")
+      .trim();
+
+    const releaseMatch = /The Employment Situation,\\s*([A-Za-z]+)\\s+(\\d{4})/i.exec(rowText);
+    if (!releaseMatch) continue;
+
+    const releasePeriod = parseObservationMonth(`${releaseMatch[1]} ${releaseMatch[2]}`);
     if (!releasePeriod) continue;
-    const releaseDate = parseScheduleDate(match[3], year);
+
+    const afterRelease = rowText.slice((releaseMatch.index ?? 0) + releaseMatch[0].length);
+    const releaseDate = parseScheduleDate(afterRelease, year);
     if (releaseDate) schedule.set(releasePeriod, releaseDate);
   }
 
+  // Archived BLS pages can have malformed table markup. Use a tightly scoped
+  // fallback that only accepts a date immediately following the release title.
   if (!schedule.size) {
-    // Fallback for archived pages where whitespace/entities differ.
-    const compact = text.replace(/\s+/g, " ");
-    const fallbackPattern = /The Employment Situation,\s*([A-Za-z]+)\s+(\d{4})\s+([A-Za-z]+\.?\s+\d{1,2}(?:,\s*\d{4})?)/g;
+    const compact = html
+      .replace(/<[^>]*>/g, " ")
+      .replace(/&nbsp;/gi, " ")
+      .replace(/\\s+/g, " ");
+    const fallbackPattern = /The Employment Situation,\\s*([A-Za-z]+)\\s+(\\d{4})\\s+((?:Jan\\.|Feb\\.|Mar\\.|Apr\\.|May|June|July|Aug\\.|Sept\\.|Oct\\.|Nov\\.|Dec\\.)\\s+\\d{1,2}(?:,\\s*\\d{4})?)/gi;
+    let match;
     while ((match = fallbackPattern.exec(compact)) !== null) {
       const releasePeriod = parseObservationMonth(`${match[1]} ${match[2]}`);
       const releaseDate = parseScheduleDate(match[3], year);
