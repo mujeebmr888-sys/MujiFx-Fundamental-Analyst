@@ -39,7 +39,6 @@ function parseObservationMonth(value) {
   }
   if (typeof value !== "string") return null;
   const text = value.trim();
-
   let match = /^(\d{4})[-\/]([0-1]\d)$/.exec(text);
   if (match && Number(match[2]) >= 1 && Number(match[2]) <= 12) return `${match[1]}-${match[2]}`;
   match = /^([A-Za-z]+)[\s\/-]+(\d{4})$/.exec(text);
@@ -108,11 +107,8 @@ async function loadReleaseSchedule(year) {
   if (!response.ok) throw new Error(`BLS ${year} release schedule failed with HTTP ${response.status}.`);
   const html = await response.text();
   const schedule = new Map();
-
-  // Parse each HTML table row independently. This prevents dates from
-  // neighboring releases being accidentally associated with an Employment
-  // Situation month (the old parser searched up to 900 characters ahead).
   const rowMatches = html.match(/<tr\b[\s\S]*?<\/tr>/gi) ?? [];
+
   for (const rawRow of rowMatches) {
     const rowText = rawRow
       .replace(/<[^>]*>/g, " ")
@@ -132,8 +128,8 @@ async function loadReleaseSchedule(year) {
     if (releaseDate) schedule.set(releasePeriod, releaseDate);
   }
 
-  // Archived BLS pages can have malformed table markup. Use a tightly scoped
-  // fallback that only accepts a date immediately following the release title.
+  // Some archived BLS pages use table markup that is not reliably matched.
+  // Fallback accepts only a date immediately following the release title.
   if (!schedule.size) {
     const compact = html
       .replace(/<[^>]*>/g, " ")
@@ -190,11 +186,7 @@ function parseWorkbook(bytes) {
     for (const column of observationColumns) {
       const value = numeric(row[column.index]);
       if (value === null) continue;
-      rows.push({
-        observationDate: column.observationDate,
-        releaseDate: releasePeriod,
-        value,
-      });
+      rows.push({ observationDate: column.observationDate, releaseDate: releasePeriod, value });
     }
     if (rows.length) releases.set(releasePeriod, rows);
   }
@@ -210,11 +202,7 @@ async function publish(rows, releasePeriod, publicationDate) {
     headers: { Authorization: `Bearer ${SECRET}`, "Content-Type": "application/json" },
     body: JSON.stringify({
       kind: "NFP",
-      snapshot: {
-        snapshotUrl: BLS_URL,
-        publicationDate,
-        label: "BLS CES Total Nonfarm Vintage Data",
-      },
+      snapshot: { snapshotUrl: BLS_URL, publicationDate, label: "BLS CES Total Nonfarm Vintage Data" },
       rows,
     }),
   });
@@ -233,7 +221,6 @@ const response = await fetch(BLS_URL, {
   },
 });
 if (!response.ok) throw new Error(`BLS vintage download failed with HTTP ${response.status}.`);
-
 const lastModified = response.headers.get("last-modified");
 if (!lastModified) throw new Error("BLS vintage download did not provide Last-Modified provenance.");
 
@@ -277,11 +264,4 @@ for (const release of releases) {
   console.log(JSON.stringify({ releasePeriod: release.releasePeriod, releaseDate, rows: eligibleRows.length, requests, totalRows }));
 }
 
-console.log(JSON.stringify({
-  success: true,
-  mode: "historical-backfill",
-  publicationDate,
-  eligibleReleases: releases.length,
-  requests,
-  totalRows,
-}, null, 2));
+console.log(JSON.stringify({ success: true, mode: "historical-backfill", publicationDate, eligibleReleases: releases.length, requests, totalRows }, null, 2));
