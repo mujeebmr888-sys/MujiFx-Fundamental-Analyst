@@ -245,7 +245,7 @@ for (const release of releases) {
   if (!releaseDate) throw new Error(`No official BLS Employment Situation release date found for ${release.releasePeriod}.`);
 
   const eligibleRows = release.rows
-    .filter((row) => row.observationDate < release.releasePeriod)
+    .filter((row) => row.observationDate <= release.releasePeriod)
     .map((row) => ({ ...row, releaseDate }));
 
   if (!eligibleRows.length) continue;
