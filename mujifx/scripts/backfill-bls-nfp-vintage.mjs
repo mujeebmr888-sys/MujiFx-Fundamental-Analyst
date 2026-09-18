@@ -84,19 +84,19 @@ function numeric(value) {
 }
 
 function parseScheduleDate(text, year) {
-  const match = /(?:Jan\\.|Feb\\.|Mar\\.|Apr\\.|May|June|July|Aug\\.|Sept\\.|Oct\\.|Nov\\.|Dec\\.)\\s+\\d{1,2}(?:,\\s*\\d{4})?/.exec(text);
+  const match = /(?:Jan\.|Feb\.|Mar\.|Apr\.|May|June|July|Aug\.|Sept\.|Oct\.|Nov\.|Dec\.)\s+\d{1,2}(?:,\s*\d{4})?/.exec(text);
   if (!match) return null;
   const normalized = match[0]
-    .replace(/Jan\\./, "January")
-    .replace(/Feb\\./, "February")
-    .replace(/Mar\\./, "March")
-    .replace(/Apr\\./, "April")
-    .replace(/Aug\\./, "August")
-    .replace(/Sept\\./, "September")
-    .replace(/Oct\\./, "October")
-    .replace(/Nov\\./, "November")
-    .replace(/Dec\\./, "December");
-  const withYear = /,\\s*(\\d{4})$/.test(normalized) ? normalized : `${normalized}, ${year}`;
+    .replace(/Jan\./, "January")
+    .replace(/Feb\./, "February")
+    .replace(/Mar\./, "March")
+    .replace(/Apr\./, "April")
+    .replace(/Aug\./, "August")
+    .replace(/Sept\./, "September")
+    .replace(/Oct\./, "October")
+    .replace(/Nov\./, "November")
+    .replace(/Dec\./, "December");
+  const withYear = /,\s*(\d{4})$/.test(normalized) ? normalized : `${normalized}, ${year}`;
   const date = new Date(withYear);
   return Number.isNaN(date.getTime()) ? null : date.toISOString().slice(0, 10);
 }
@@ -118,10 +118,10 @@ async function loadReleaseSchedule(year) {
       .replace(/<[^>]*>/g, " ")
       .replace(/&nbsp;/gi, " ")
       .replace(/&amp;/gi, "&")
-      .replace(/\\s+/g, " ")
+      .replace(/\s+/g, " ")
       .trim();
 
-    const releaseMatch = /The Employment Situation,\\s*([A-Za-z]+)\\s+(\\d{4})/i.exec(rowText);
+    const releaseMatch = /The Employment Situation,\s*([A-Za-z]+)\s+(\d{4})/i.exec(rowText);
     if (!releaseMatch) continue;
 
     const releasePeriod = parseObservationMonth(`${releaseMatch[1]} ${releaseMatch[2]}`);
@@ -138,8 +138,8 @@ async function loadReleaseSchedule(year) {
     const compact = html
       .replace(/<[^>]*>/g, " ")
       .replace(/&nbsp;/gi, " ")
-      .replace(/\\s+/g, " ");
-    const fallbackPattern = /The Employment Situation,\\s*([A-Za-z]+)\\s+(\\d{4})\\s+((?:Jan\\.|Feb\\.|Mar\\.|Apr\\.|May|June|July|Aug\\.|Sept\\.|Oct\\.|Nov\\.|Dec\\.)\\s+\\d{1,2}(?:,\\s*\\d{4})?)/gi;
+      .replace(/\s+/g, " ");
+    const fallbackPattern = /The Employment Situation,\s*([A-Za-z]+)\s+(\d{4})\s+((?:Jan\.|Feb\.|Mar\.|Apr\.|May|June|July|Aug\.|Sept\.|Oct\.|Nov\.|Dec\.)\s+\d{1,2}(?:,\s*\d{4})?)/gi;
     let match;
     while ((match = fallbackPattern.exec(compact)) !== null) {
       const releasePeriod = parseObservationMonth(`${match[1]} ${match[2]}`);
