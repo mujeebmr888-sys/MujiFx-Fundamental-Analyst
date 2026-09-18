@@ -84,10 +84,19 @@ function numeric(value) {
 }
 
 function parseScheduleDate(text, year) {
-  const match = new RegExp("(?:Jan\\.|Feb\\.|Mar\\.|Apr\\.|May|June|July|Aug\\.|Sept\\.|Oct\\.|Nov\\.|Dec\\.)\\s+\\d{1,2}(?:,\\s*\\d{4})?").exec(text);
+  const match = /(?:Jan\.|Feb\.|Mar\.|Apr\.|May|June|July|Aug\.|Sept\.|Oct\.|Nov\.|Dec\.)\s+\d{1,2}(?:,\s*\d{4})?/.exec(text);
   if (!match) return null;
-  const normalized = match[0].replace(/Jan\\./, "January").replace(/Feb\\./, "February").replace(/Mar\\./, "March").replace(/Apr\\./, "April").replace(/Aug\\./, "August").replace(/Sept\\./, "September").replace(/Oct\\./, "October").replace(/Nov\\./, "November").replace(/Dec\\./, "December");
-  const withYear = /,\\s*(\\d{4})$/.test(normalized) ? normalized : `${normalized}, ${year}`;
+  const normalized = match[0]
+    .replace(/Jan\./, "January")
+    .replace(/Feb\./, "February")
+    .replace(/Mar\./, "March")
+    .replace(/Apr\./, "April")
+    .replace(/Aug\./, "August")
+    .replace(/Sept\./, "September")
+    .replace(/Oct\./, "October")
+    .replace(/Nov\./, "November")
+    .replace(/Dec\./, "December");
+  const withYear = /,\s*(\d{4})$/.test(normalized) ? normalized : `${normalized}, ${year}`;
   const date = new Date(withYear);
   return Number.isNaN(date.getTime()) ? null : date.toISOString().slice(0, 10);
 }
@@ -98,17 +107,28 @@ async function loadReleaseSchedule(year) {
   });
   if (!response.ok) throw new Error(`BLS ${year} release schedule failed with HTTP ${response.status}.`);
   const html = await response.text();
+  const text = html.replace(/<[^>]*>/g, " ").replace(/&nbsp;/gi, " ");
   const schedule = new Map();
 
-  // The annual BLS schedule table pairs each indicator name with its release date.
-  const titlePattern = /The Employment Situation,\\s*([A-Za-z]+)\\s+(\\d{4})/g;
+  // The schedule is a table with release name and date in the same row.
+  const rowPattern = /The Employment Situation,\s*([A-Za-z]+)\s+(\d{4})([\s\S]{0,900}?)(?=The Employment Situation,|$)/g;
   let match;
-  while ((match = titlePattern.exec(html)) !== null) {
+  while ((match = rowPattern.exec(text)) !== null) {
     const releasePeriod = parseObservationMonth(`${match[1]} ${match[2]}`);
     if (!releasePeriod) continue;
-    const window = html.slice(match.index, match.index + 1800).replace(/<[^>]+>/g, " ");
-    const releaseDate = parseScheduleDate(window, year);
+    const releaseDate = parseScheduleDate(match[3], year);
     if (releaseDate) schedule.set(releasePeriod, releaseDate);
+  }
+
+  if (!schedule.size) {
+    // Fallback for archived pages where whitespace/entities differ.
+    const compact = text.replace(/\s+/g, " ");
+    const fallbackPattern = /The Employment Situation,\s*([A-Za-z]+)\s+(\d{4})\s+([A-Za-z]+\.?\s+\d{1,2}(?:,\s*\d{4})?)/g;
+    while ((match = fallbackPattern.exec(compact)) !== null) {
+      const releasePeriod = parseObservationMonth(`${match[1]} ${match[2]}`);
+      const releaseDate = parseScheduleDate(match[3], year);
+      if (releasePeriod && releaseDate) schedule.set(releasePeriod, releaseDate);
+    }
   }
 
   if (!schedule.size) throw new Error(`BLS ${year} release schedule contained no Employment Situation dates.`);
@@ -123,8 +143,6 @@ function parseWorkbook(bytes) {
   const matrix = XLSX.utils.sheet_to_json(sheet, { header: 1, raw: true, defval: null });
   if (matrix.length < 4) throw new Error("BLS vintage Data sheet does not contain enough rows.");
 
-  // Official BLS layout: column A identifies the Employment Situation release;
-  // columns B+ are reference months.
   let headerRowIndex = -1;
   let observationColumns = [];
 
@@ -226,7 +244,6 @@ for (const release of releases) {
   const releaseDate = schedules.get(release.releasePeriod);
   if (!releaseDate) throw new Error(`No official BLS Employment Situation release date found for ${release.releasePeriod}.`);
 
-  // Keep only information that could actually have been available by the release.
   const eligibleRows = release.rows
     .filter((row) => row.observationDate < release.releasePeriod)
     .map((row) => ({ ...row, releaseDate }));
