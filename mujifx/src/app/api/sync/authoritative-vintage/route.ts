@@ -46,6 +46,56 @@ function parseIsoDate(value: string, field: string): Date {
   return parsed;
 }
 
+function cleanBlsScheduleCell(value: string): string {
+  return value
+    .replace(/<script[\s\S]*?<\/script>/gi, " ")
+    .replace(/<style[\s\S]*?<\/style>/gi, " ")
+    .replace(/<[^>]*>/g, " ")
+    .replace(/&nbsp;/gi, " ")
+    .replace(/&amp;/gi, "&")
+    .replace(/&#39;/gi, "'")
+    .replace(/&quot;/gi, '"')
+    .replace(/\s+/g, " ")
+    .trim();
+}
+
+function parseBlsScheduleDate(text: string, year: string): string | null {
+  const match = /(?:Jan(?:uary)?\.?|Feb(?:ruary)?\.?|Mar(?:ch)?\.?|Apr(?:il)?\.?|May|June|July|Aug(?:ust)?\.?|Sept?(?:ember)?\.?|Oct(?:ober)?\.?|Nov(?:ember)?\.?|Dec(?:ember)?\.?)\s+\d{1,2}(?:,\s*\d{4})?/i.exec(text);
+  if (!match) return null;
+
+  const normalized = match[0]
+    .replace(/^Jan(?:uary)?\./i, "January")
+    .replace(/^Feb(?:ruary)?\./i, "February")
+    .replace(/^Mar(?:ch)?\./i, "March")
+    .replace(/^Apr(?:il)?\./i, "April")
+    .replace(/^Aug(?:ust)?\./i, "August")
+    .replace(/^Sept?(?:ember)?\./i, "September")
+    .replace(/^Oct(?:ober)?\./i, "October")
+    .replace(/^Nov(?:ember)?\./i, "November")
+    .replace(/^Dec(?:ember)?\./i, "December");
+
+  const date = new Date(/,\s*\d{4}$/.test(normalized) ? normalized : normalized + ", " + year);
+  return Number.isNaN(date.getTime()) ? null : date.toISOString().slice(0, 10);
+}
+
+function extractBlsScheduleRows(html: string): string[][] {
+  const rows: string[][] = [];
+  const rowPattern = /<tr\b[^>]*>([\s\S]*?)<\/tr>/gi;
+  let rowMatch: RegExpExecArray | null;
+
+  while ((rowMatch = rowPattern.exec(html)) !== null) {
+    const cells: string[] = [];
+    const cellPattern = /<t[dh]\b[^>]*>([\s\S]*?)<\/t[dh]>/gi;
+    let cellMatch: RegExpExecArray | null;
+    while ((cellMatch = cellPattern.exec(rowMatch[1])) !== null) {
+      cells.push(cleanBlsScheduleCell(cellMatch[1]));
+    }
+    if (cells.length) rows.push(cells);
+  }
+
+  return rows;
+}
+
 async function resolveOfficialNfpReleaseDate(releasePeriod: string): Promise<string> {
   const year = releasePeriod.slice(0, 4);
   const response = await fetch("https://www.bls.gov/schedule/" + year + "/home.htm", {
@@ -57,18 +107,33 @@ async function resolveOfficialNfpReleaseDate(releasePeriod: string): Promise<str
     signal: AbortSignal.timeout(15_000),
   });
   if (!response.ok) throw new Error("BLS " + year + " release schedule failed with HTTP " + response.status + ".");
+
   const html = await response.text();
-  const text = html.replace(/<[^>]*>/g, " ").replace(/&nbsp;/gi, " ").replace(/\s+/g, " ");
   const monthNames = ["january","february","march","april","may","june","july","august","september","october","november","december"];
   const month = monthNames[Number(releasePeriod.slice(5, 7)) - 1];
-  const pattern = new RegExp("The Employment Situation,\\s*" + month + "\\s+" + year + "\\s+([A-Za-z]+\\.?\\s+\\d{1,2}(?:,\\s*\\d{4})?)", "i");
-  const match = pattern.exec(text);
-  if (!match) throw new Error("No official BLS Employment Situation release date found for " + releasePeriod + ".");
-  const normalized = match[1].replace(/Jan\./i,"January").replace(/Feb\./i,"February").replace(/Mar\./i,"March").replace(/Apr\./i,"April").replace(/Aug\./i,"August").replace(/Sept\./i,"September").replace(/Oct\./i,"October").replace(/Nov\./i,"November").replace(/Dec\./i,"December");
-  const date = new Date(/,\s*\d{4}$/.test(normalized) ? normalized : normalized + ", " + year);
-  if (Number.isNaN(date.getTime())) throw new Error("Invalid official BLS release date for " + releasePeriod + ": " + match[1]);
-  return date.toISOString().slice(0, 10);
+  const title = new RegExp("(?:The\\s+)?Employment\\s+Situation(?:,|\\s+for)\\s*" + month + "\\s+" + year, "i");
+
+  for (const cells of extractBlsScheduleRows(html)) {
+    const rowText = cells.join(" | ");
+    if (!title.test(rowText)) continue;
+
+    const releaseDate = parseBlsScheduleDate(rowText, year);
+    if (releaseDate) return releaseDate;
+  }
+
+  // Fallback for historical pages that do not expose table cells consistently.
+  const clean = cleanBlsScheduleCell(html);
+  const titlePattern = new RegExp("(?:The\\s+)?Employment\\s+Situation(?:,|\\s+for)\\s*" + month + "\\s+" + year, "i");
+  const match = titlePattern.exec(clean);
+  if (match) {
+    const window = clean.slice(Math.max(0, match.index - 160), match.index + match[0].length + 260);
+    const releaseDate = parseBlsScheduleDate(window, year);
+    if (releaseDate) return releaseDate;
+  }
+
+  throw new Error("No official BLS Employment Situation release date found for " + releasePeriod + ".");
 }
+
 function assertOfficialSnapshotUrl(snapshotUrl: string): void {
   let parsed: URL;
   try {
