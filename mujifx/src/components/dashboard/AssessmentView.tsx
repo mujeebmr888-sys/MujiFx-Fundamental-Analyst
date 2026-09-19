@@ -1,10 +1,10 @@
 /**
  * Renders ONE category assessment (or the overall condition) with its full
  * traceable chain intact:
- *   FACT → CALCULATION → INTERPRETATION → ASSESSMENT → CONFIDENCE →
- *   EVIDENCE → CONFLICTING EVIDENCE → DATA LIMITATIONS
+ *   FACT -> CALCULATION -> INTERPRETATION -> ASSESSMENT -> CONFIDENCE ->
+ *   EVIDENCE -> CONFLICTING EVIDENCE -> DATA LIMITATIONS
  *
- * Nothing is collapsed into a single opaque sentence — the point of the
+ * Nothing is collapsed into a single opaque sentence - the point of the
  * engines is that every label is checkable, so the UI shows the formula
  * and the rule text alongside the result.
  */
@@ -115,7 +115,7 @@ export default function AssessmentView({
 
       <Block title="Facts (as retrieved, uninterpreted)">
         {assessment.facts.length === 0 ? (
-          <EmptyNote text="No raw facts at this layer — its inputs are the category assessments themselves." />
+          <EmptyNote text="No raw facts at this layer - its inputs are the category assessments themselves." />
         ) : (
           <div className="space-y-1.5">
             {assessment.facts.map((fact, i) => (
