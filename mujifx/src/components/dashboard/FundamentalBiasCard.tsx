@@ -21,7 +21,7 @@ export default function FundamentalBiasCard({ score }: { score: FundamentalScore
           USD Fundamental Bias
         </h2>
         <span className="text-xs text-slate-500">
-          Rules-based score, not a trade signal
+          Legacy quick gauge - the engine above is authoritative
         </span>
       </div>
 
@@ -42,10 +42,12 @@ export default function FundamentalBiasCard({ score }: { score: FundamentalScore
       </div>
 
       <p className="text-[11px] text-slate-600 mt-4 italic">
-        This score mechanically combines a few widely-known macro
-        relationships from data already shown below. It does not predict
-        price movement, incorporate every relevant factor, or account for
-        market positioning — treat it as a structured summary, not advice.
+        A simple headline gauge over a few rate-type series only. It is not
+        the fundamental engine: the Overall USD Fundamental Condition above
+        is produced by the six category engines and the orchestrator, and
+        is authoritative wherever the two differ. Index/level series are
+        deliberately excluded here (see the rows marked above) because a
+        one-period change in a level cannot be read as a signal. Not advice.
       </p>
     </div>
   );
