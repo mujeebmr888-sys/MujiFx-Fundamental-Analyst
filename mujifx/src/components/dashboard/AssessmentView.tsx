@@ -87,10 +87,8 @@ export default function AssessmentView({
   rationale,
 }: {
   title: string;
-  /** The category's own verdict word, e.g. "Strong" / "Hawkish" / "Risk-Off". */
   label: string;
   assessment: AssessmentLike;
-  /** Only the orchestrator has one — which named rule fired and why. */
   rationale?: string;
 }) {
   const labelColor = LABEL_STYLES[label] ?? "text-slate-200";
