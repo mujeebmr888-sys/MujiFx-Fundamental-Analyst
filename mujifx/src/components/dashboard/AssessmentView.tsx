@@ -131,7 +131,7 @@ export default function AssessmentView({
                   </span>
                 )}
                 {fact.source?.url && (
-                  
+                  <a
                     href={fact.source.url}
                     target="_blank"
                     rel="noopener noreferrer"
