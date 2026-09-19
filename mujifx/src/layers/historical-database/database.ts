@@ -1,7 +1,7 @@
 /**
  * LAYER 3: HISTORICAL DATABASE
  * Only this file talks to the economic_data_points table.
- * Nothing upstream (scoring, AI reasoning, frontend) should write raw SQL —
+ * Nothing upstream (scoring, AI reasoning, frontend) should write raw SQL -
  * they call these functions instead.
  */
 
@@ -22,7 +22,7 @@ import type { AnalystAssessment } from "@/types/economic-data";
  * from legacy transport to their official source adapters.
  *
  * Uses the ADMIN client (service_role key) because writes are intentionally
- * blocked for the public/anon key by Row Level Security — see docs/schema.sql.
+ * blocked for the public/anon key by Row Level Security - see docs/schema.sql.
  * This function must only ever be called from server-side code (API routes),
  * never from a client component.
  */
@@ -85,7 +85,7 @@ export async function getIndicatorHistory(
 
 /**
  * Gets the latest data point for MANY indicators in a single database query
- * (instead of one query per indicator). Returns a map keyed by indicator —
+ * (instead of one query per indicator). Returns a map keyed by indicator -
  * indicators with no data yet simply won't have a key, so callers should
  * check for undefined rather than assuming every indicator is present.
  */
@@ -104,7 +104,7 @@ export async function getLatestForIndicators(indicators: IndicatorId[]) {
   const latestByIndicator = new Map<string, (typeof data)[number]>();
   for (const row of data ?? []) {
     // Rows are ordered newest-first, so the first time we see an indicator
-    // is its latest observation period — skip any further (older) rows for it.
+    // is its latest observation period - skip any further (older) rows for it.
     if (!latestByIndicator.has(row.indicator)) {
       latestByIndicator.set(row.indicator, row);
     }
@@ -114,7 +114,7 @@ export async function getLatestForIndicators(indicators: IndicatorId[]) {
 
 /**
  * Gets the latest MUJIFX forecast row for each indicator (the "future"
- * placeholder rows saveForecast() creates — actual is null, mujifx_estimate
+ * placeholder rows saveForecast() creates - actual is null, mujifx_estimate
  * is not). Separate from getLatestForIndicators, which is for real releases.
  */
 export async function getLatestForecasts(indicators: IndicatorId[]) {
@@ -124,24 +124,32 @@ export async function getLatestForecasts(indicators: IndicatorId[]) {
     .in("indicator", indicators)
     .is("actual", null)
     .not("mujifx_estimate", "is", null)
-    .order("period_covered", { ascending: false });
+    // ASCENDING on purpose. Descending returned the FURTHEST-OUT future
+    // row as "the latest forecast" - which, while the forecast-on-forecast
+    // chain bug was live, meant the Forecasts page displayed the most
+    // corrupted estimate in the table (a March 2027 CPI projection built
+    // on six earlier projections). The next upcoming release is the only
+    // forecast that means anything.
+    .order("period_covered", { ascending: true });
 
   if (error) {
     throw new Error(`Failed to fetch forecasts: ${error.message}`);
   }
 
-  const latestByIndicator = new Map<string, (typeof data)[number]>();
+  const nextByIndicator = new Map<string, (typeof data)[number]>();
   for (const row of data ?? []) {
-    if (!latestByIndicator.has(row.indicator)) {
-      latestByIndicator.set(row.indicator, row);
+    // Rows are oldest-first, so the first future row seen per indicator is
+    // the nearest upcoming period.
+    if (!nextByIndicator.has(row.indicator)) {
+      nextByIndicator.set(row.indicator, row);
     }
   }
-  return latestByIndicator;
+  return nextByIndicator;
 }
 
 /**
  * Gets the single latest data point for an indicator, or null if none exists
- * yet. Never returns fabricated data — an empty database means null, not a
+ * yet. Never returns fabricated data - an empty database means null, not a
  * fake number.
  */
 export async function getLatestDataPoint(indicator: IndicatorId) {
@@ -161,14 +169,14 @@ export async function getLatestDataPoint(indicator: IndicatorId) {
 }
 
 /**
- * Saves a MUJIFX forecast as an upcoming row (actual stays null — it hasn't
+ * Saves a MUJIFX forecast as an upcoming row (actual stays null - it hasn't
  * been released yet). If a row for that future period already exists (e.g.
  * from a previous forecast run), this updates just the forecast fields
  * without disturbing anything else.
  */
 export async function saveForecast(forecast: ForecastResult) {
   if (forecast.estimate === null) {
-    // Insufficient data — nothing to save yet, and that's an honest,
+    // Insufficient data - nothing to save yet, and that's an honest,
     // expected state, not an error.
     return null;
   }
@@ -183,7 +191,7 @@ export async function saveForecast(forecast: ForecastResult) {
         actual: null,
         available: false,
         unavailable_reason:
-          "Not yet released. Showing MUJIFX's model estimate below — not confirmed government data.",
+          "Not yet released. Showing MUJIFX's model estimate below - not confirmed government data.",
         unit: "",
         source_name: "MUJIFX Forecast Engine (internal model)",
         source_url: "",
@@ -208,13 +216,16 @@ export async function saveForecast(forecast: ForecastResult) {
 
 /**
  * Saves the latest AI analyst assessment. We only keep one row (the most
- * recent), so this deletes any existing row first, then inserts fresh —
+ * recent), so this deletes any existing row first, then inserts fresh -
  * simpler than upsert logic for a single-row table.
  */
 export async function saveAnalystAssessment(
   assessment: AnalystAssessment,
-  scoreValue: number,
-  scoreBias: string
+  verdict: {
+    overallCondition: string;
+    overallConfidence: string;
+    decisionRule: string;
+  }
 ) {
   await supabaseAdmin.from("analyst_assessments").delete().neq("id", 0);
 
@@ -233,8 +244,16 @@ export async function saveAnalystAssessment(
       risks: assessment.risks,
       final_assessment: assessment.finalAssessment,
       disclaimer: assessment.disclaimer,
-      fundamental_score: scoreValue,
-      fundamental_bias: scoreBias,
+      // The orchestrator's condition is the verdict of record. The legacy
+      // fundamental_score/fundamental_bias columns are intentionally left
+      // NULL - writing the quick score here made the research note appear
+      // to be based on a number the engine does not treat as authoritative.
+      overall_condition: verdict.overallCondition,
+      overall_confidence: verdict.overallConfidence,
+      decision_rule: verdict.decisionRule,
+      // Stored as text[] of source names; the full refs live in the
+      // assessment object the note was generated from.
+      sources_used: assessment.sourcesUsed.map((s) => s.name),
     })
     .select();
 
