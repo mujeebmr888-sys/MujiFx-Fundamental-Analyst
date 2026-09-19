@@ -1,281 +1,239 @@
 /**
- * LAYER 3: HISTORICAL DATABASE
- * Only this file talks to the economic_data_points table.
- * Nothing upstream (scoring, AI reasoning, frontend) should write raw SQL -
- * they call these functions instead.
- */
-
-import { supabase } from "@/config/supabase";
-import { supabaseAdmin } from "@/config/supabase-admin";
-import type { EconomicDataRow } from "@/layers/data-normalization/normalize";
-import type { IndicatorId } from "@/types/economic-data";
-import type { ForecastResult } from "@/layers/forecast-engine/forecast";
-import type { AnalystAssessment } from "@/types/economic-data";
-
-/**
- * Saves a normalized data point.
+ * LAYER 7: AI ANALYST REASONING
  *
- * Legacy/FRED ingestion must never overwrite an already-ingested authoritative
- * observation for the same indicator + period. The authoritative writer is
- * allowed to replace legacy rows, but the reverse direction is blocked here.
- * This protects source precedence while the remaining indicators are migrated
- * from legacy transport to their official source adapters.
+ * Turns the structured assessment Layers 1-6 already produced into written
+ * analyst commentary, following the reasoning chain from the spec:
+ *   DATA -> what changed -> why -> economic implications -> Fed implications
+ *   -> market expectations -> market pricing -> cross-asset confirmation
+ *   -> contradictions -> risks -> final assessment
  *
- * Uses the ADMIN client (service_role key) because writes are intentionally
- * blocked for the public/anon key by Row Level Security - see docs/schema.sql.
- * This function must only ever be called from server-side code (API routes),
- * never from a client component.
- */
-export async function saveDataPoint(row: EconomicDataRow) {
-  const { data: existing, error: lookupError } = await supabaseAdmin
-    .from("economic_data_points")
-    .select("id, data_origin")
-    .eq("indicator", row.indicator)
-    .eq("period_covered", row.period_covered)
-    .maybeSingle();
-
-  if (lookupError) {
-    throw new Error(
-      `Failed to check existing ${row.indicator} observation: ${lookupError.message}`
-    );
-  }
-
-  if (existing?.data_origin?.startsWith("authoritative_")) {
-    return [existing];
-  }
-
-  const { data, error } = await supabaseAdmin
-    .from("economic_data_points")
-    .upsert(row, { onConflict: "indicator,period_covered" })
-    .select();
-
-  if (error) {
-    throw new Error(`Failed to save ${row.indicator}: ${error.message}`);
-  }
-  return data;
-}
-
-/**
- * Gets recent REAL history for one indicator, most recent first.
- * Forecast placeholders are deliberately excluded because they have
- * actual = null and must never participate in deterministic category
- * calculations or confidence checks.
+ * ---------------------------------------------------------------------
+ * REWIRED (fixed bug)
+ * ---------------------------------------------------------------------
+ * This layer used to be handed the LEGACY quick score from scoring.ts -
+ * a single -10..+10 number built from month-over-month moves of a few
+ * series, two of which were index levels that rise almost every month.
+ * The written note therefore described a number the rest of the system
+ * does not consider authoritative, and had no access to the category
+ * engines' evidence, contradictions or confidence.
  *
- * Uses period_covered rather than release_date because legacy rows may have
- * release_date populated from the observation period and authoritative rows
- * may not have a verified source release date yet.
+ * It is now handed the orchestrator's UsdFundamentalAssessment: the real
+ * engine output, including every category's own label, confidence,
+ * evidence, conflicting evidence and stated data limitations. The model
+ * writes prose ABOUT that structure - it does not produce any verdict of
+ * its own, and every label it can mention already exists in the input.
+ *
+ * The model is explicitly instructed never to invent data, never issue
+ * buy/sell language, and never claim certainty. If output fails
+ * validation, nothing is saved rather than showing a malformed or
+ * unverifiable result.
  */
-export async function getIndicatorHistory(
-  indicator: IndicatorId,
-  limit: number = 12
-) {
-  const { data, error } = await supabase
-    .from("economic_data_points")
-    .select("*")
-    .eq("indicator", indicator)
-    .not("actual", "is", null)
-    .order("period_covered", { ascending: false })
-    .limit(limit);
 
-  if (error) {
-    throw new Error(`Failed to fetch history for ${indicator}: ${error.message}`);
-  }
-  return data;
+import type { AnalystAssessment, DataSourceRef } from "@/types/economic-data";
+import type { UsdFundamentalAssessment } from "@/types/assessment";
+
+export interface AnalystInput {
+  assessment: UsdFundamentalAssessment;
+  /**
+   * The raw latest observations already verified by Layer 1-3, so the
+   * model can name actual numbers instead of speaking only in labels.
+   * Every entry must be a real stored row - never a placeholder.
+   */
+  indicatorFacts: Array<{
+    label: string;
+    actual: number | null;
+    previous: number | null;
+    periodCovered: string;
+    /** The provenance actually stored with the row - never synthesised. */
+    source: DataSourceRef;
+  }>;
 }
 
-/**
- * Gets the latest data point for MANY indicators in a single database query
- * (instead of one query per indicator). Returns a map keyed by indicator -
- * indicators with no data yet simply won't have a key, so callers should
- * check for undefined rather than assuming every indicator is present.
- */
-export async function getLatestForIndicators(indicators: IndicatorId[]) {
-  const { data, error } = await supabase
-    .from("economic_data_points")
-    .select("*")
-    .in("indicator", indicators)
-    .not("actual", "is", null)
-    .order("period_covered", { ascending: false });
+const SYSTEM_INSTRUCTIONS = `You are a macro/fundamental research analyst writing an internal briefing about the US Dollar (USD).
 
-  if (error) {
-    throw new Error(`Failed to fetch latest indicators: ${error.message}`);
-  }
+You are summarising an assessment that has ALREADY been produced by a deterministic rules engine. Your job is to explain it in plain English - not to reach your own verdict.
 
-  const latestByIndicator = new Map<string, (typeof data)[number]>();
-  for (const row of data ?? []) {
-    // Rows are ordered newest-first, so the first time we see an indicator
-    // is its latest observation period - skip any further (older) rows for it.
-    if (!latestByIndicator.has(row.indicator)) {
-      latestByIndicator.set(row.indicator, row);
-    }
+STRICT RULES - violating any of these makes your output unusable:
+1. Use ONLY the data and assessment given to you below. Never invent, estimate, or assume any number, date, or category label that isn't provided.
+2. NEVER give trading advice, a buy/sell recommendation, a price target, or any actionable trade instruction.
+3. NEVER claim certainty about future data releases or price movements. Use hedged language ("suggests", "may indicate", "is consistent with") not definitive language ("will", "guarantees").
+4. NEVER contradict or override the engine's overall condition or any category label. If you think the data points elsewhere, say so in "contradictions" - do not change the verdict.
+5. The listed conflicting evidence MUST appear in your "contradictions" field. Do not smooth it over or force a one-sided narrative. If the engine listed no conflicts, say that plainly.
+6. Reflect the stated confidence honestly. If confidence is Low or "Insufficient data", say the picture is provisional and why.
+7. Risk Environment is context only. Do not translate Risk-Off into USD strength or Risk-On into USD weakness.
+8. Frame everything as an assessment of current conditions ("USD fundamental condition assessed as X"), never as a prediction ("the USD will rise").
+
+Structure your response as JSON with exactly these keys (all string values, plain text, no markdown):
+whatChanged, whyItChanged, economicImplications, centralBankImplications, marketExpectationsVsPricing, crossAssetConfirmation, contradictions, risks, finalAssessment
+
+Each value should be 1-3 sentences. Return ONLY the JSON object, nothing else.`;
+
+/** Renders one category's engine output as plain text for the prompt. */
+function describeCategory(
+  name: string,
+  category: {
+    assessment: string;
+    confidence: string;
+    evidence: string[];
+    conflictingEvidence: string[];
+    dataLimitations: string[];
   }
-  return latestByIndicator;
+): string {
+  const lines = [`${name}: ${category.assessment} (confidence: ${category.confidence})`];
+  for (const item of category.evidence) lines.push(`    supporting: ${item}`);
+  for (const item of category.conflictingEvidence) lines.push(`    conflicting: ${item}`);
+  for (const item of category.dataLimitations) lines.push(`    limitation: ${item}`);
+  return lines.join("\n");
 }
 
-/**
- * Gets the latest MUJIFX forecast row for each indicator (the "future"
- * placeholder rows saveForecast() creates - actual is null, mujifx_estimate
- * is not). Separate from getLatestForIndicators, which is for real releases.
- */
-export async function getLatestForecasts(indicators: IndicatorId[]) {
-  const { data, error } = await supabase
-    .from("economic_data_points")
-    .select("*")
-    .in("indicator", indicators)
-    .is("actual", null)
-    .not("mujifx_estimate", "is", null)
-    // ASCENDING on purpose. Descending returned the FURTHEST-OUT future
-    // row as "the latest forecast" - which, while the forecast-on-forecast
-    // chain bug was live, meant the Forecasts page displayed the most
-    // corrupted estimate in the table (a March 2027 CPI projection built
-    // on six earlier projections). The next upcoming release is the only
-    // forecast that means anything.
-    .order("period_covered", { ascending: true });
-
-  if (error) {
-    throw new Error(`Failed to fetch forecasts: ${error.message}`);
-  }
-
-  const nextByIndicator = new Map<string, (typeof data)[number]>();
-  for (const row of data ?? []) {
-    // Rows are oldest-first, so the first future row seen per indicator is
-    // the nearest upcoming period.
-    if (!nextByIndicator.has(row.indicator)) {
-      nextByIndicator.set(row.indicator, row);
-    }
-  }
-  return nextByIndicator;
-}
-
-/**
- * Gets the single latest data point for an indicator, or null if none exists
- * yet. Never returns fabricated data - an empty database means null, not a
- * fake number.
- */
-export async function getLatestDataPoint(indicator: IndicatorId) {
-  const { data, error } = await supabase
-    .from("economic_data_points")
-    .select("*")
-    .eq("indicator", indicator)
-    .not("actual", "is", null)
-    .order("period_covered", { ascending: false })
-    .limit(1)
-    .maybeSingle();
-
-  if (error) {
-    throw new Error(`Failed to fetch latest for ${indicator}: ${error.message}`);
-  }
-  return data;
-}
-
-/**
- * Saves a MUJIFX forecast as an upcoming row (actual stays null - it hasn't
- * been released yet). If a row for that future period already exists (e.g.
- * from a previous forecast run), this updates just the forecast fields
- * without disturbing anything else.
- */
-export async function saveForecast(forecast: ForecastResult) {
-  if (forecast.estimate === null) {
-    // Insufficient data - nothing to save yet, and that's an honest,
-    // expected state, not an error.
+export async function generateAnalystAssessment(
+  input: AnalystInput
+): Promise<AnalystAssessment | null> {
+  const apiKey = process.env.GEMINI_API_KEY;
+  if (!apiKey) {
+    // AI commentary is an optional layer. Do not turn a missing optional
+    // credential into a production error for the core data pipeline.
     return null;
   }
 
-  const { data, error } = await supabaseAdmin
-    .from("economic_data_points")
-    .upsert(
+  const { assessment } = input;
+  const c = assessment.categories;
+
+  const categoryBlock = [
+    describeCategory("Inflation", c.inflation),
+    describeCategory("Employment", c.employment),
+    describeCategory("Growth", c.growth),
+    describeCategory("Monetary Policy", c.monetaryPolicy),
+    describeCategory("Market Pricing", c.marketPricing),
+    describeCategory("Risk Environment (CONTEXT ONLY)", c.riskEnvironment),
+  ].join("\n\n");
+
+  const factBlock =
+    input.indicatorFacts.length > 0
+      ? input.indicatorFacts
+          .map(
+            (f) =>
+              `- ${f.label}: actual=${f.actual ?? "N/A"}, previous=${f.previous ?? "N/A"}, period=${f.periodCovered}, source=${f.source.name}`
+          )
+          .join("\n")
+      : "No stored observations available. Do not invent any numbers; describe the assessment in qualitative terms only.";
+
+  const orchestrationBlock = [
+    `Overall USD Fundamental Condition: ${assessment.overallCondition}`,
+    `Overall confidence: ${assessment.confidence}`,
+    `Decision rule applied: ${assessment.rationale}`,
+    "",
+    "Supporting evidence at the overall level:",
+    ...assessment.evidence.map((e) => `- ${e}`),
+    "",
+    "Conflicting evidence at the overall level (MUST be reflected in your contradictions field):",
+    ...(assessment.conflictingEvidence.length > 0
+      ? assessment.conflictingEvidence.map((e) => `- ${e}`)
+      : ["- none recorded"]),
+    "",
+    "Overall data limitations:",
+    ...assessment.dataLimitations.map((e) => `- ${e}`),
+  ].join("\n");
+
+  const prompt = `${SYSTEM_INSTRUCTIONS}
+
+=== ENGINE ASSESSMENT (authoritative - do not override) ===
+${orchestrationBlock}
+
+=== CATEGORY ENGINE OUTPUT ===
+${categoryBlock}
+
+=== VERIFIED LATEST OBSERVATIONS ===
+${factBlock}`;
+
+  try {
+    const res = await fetch(
+      `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.0-flash:generateContent?key=${apiKey}`,
       {
-        indicator: forecast.indicator,
-        period_covered: forecast.forecastForPeriod,
-        release_date: forecast.forecastForPeriod,
-        actual: null,
-        available: false,
-        unavailable_reason:
-          "Not yet released. Showing MUJIFX's model estimate below - not confirmed government data.",
-        unit: "",
-        source_name: "MUJIFX Forecast Engine (internal model)",
-        source_url: "",
-        source_tier: "TIER_3_RESEARCH",
-        retrieved_at: new Date().toISOString(),
-        mujifx_estimate: forecast.estimate,
-        mujifx_estimate_low: forecast.rangeLow,
-        mujifx_estimate_high: forecast.rangeHigh,
-        mujifx_confidence: forecast.confidence,
-        mujifx_rationale: forecast.rationale,
-        mujifx_risks: forecast.risks,
-      },
-      { onConflict: "indicator,period_covered" }
-    )
-    .select();
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          contents: [{ parts: [{ text: prompt }] }],
+          generationConfig: { temperature: 0.3, responseMimeType: "application/json" },
+        }),
+      }
+    );
 
-  if (error) {
-    throw new Error(`Failed to save forecast for ${forecast.indicator}: ${error.message}`);
+    if (!res.ok) {
+      console.error("Gemini API error:", res.status, await res.text());
+      return null;
+    }
+
+    const json = await res.json();
+    const text = json?.candidates?.[0]?.content?.parts?.[0]?.text;
+    if (!text) {
+      console.error("Gemini returned no text.");
+      return null;
+    }
+
+    const parsed = JSON.parse(text);
+
+    const requiredKeys = [
+      "whatChanged",
+      "whyItChanged",
+      "economicImplications",
+      "centralBankImplications",
+      "marketExpectationsVsPricing",
+      "crossAssetConfirmation",
+      "contradictions",
+      "risks",
+      "finalAssessment",
+    ];
+    for (const key of requiredKeys) {
+      if (typeof parsed[key] !== "string" || parsed[key].trim().length === 0) {
+        console.error(`Gemini response missing/invalid key: ${key}`);
+        return null;
+      }
+    }
+
+    // Reject trade-signal language outright rather than publishing it and
+    // hoping nobody notices. This is a research product, not a signal feed.
+    const combined = requiredKeys.map((k) => parsed[k]).join(" ").toLowerCase();
+    const bannedPhrases = [
+      "buy usd",
+      "sell usd",
+      "go long",
+      "go short",
+      "price target",
+      "entry point",
+      "stop loss",
+      "take profit",
+      "recommend buying",
+      "recommend selling",
+    ];
+    const violation = bannedPhrases.find((phrase) => combined.includes(phrase));
+    if (violation) {
+      console.error(`Gemini output contained trade-signal language ("${violation}") - discarded.`);
+      return null;
+    }
+
+    return {
+      currency: "USD",
+      generatedAt: new Date().toISOString(),
+      whatChanged: parsed.whatChanged,
+      whyItChanged: parsed.whyItChanged,
+      economicImplications: parsed.economicImplications,
+      centralBankImplications: parsed.centralBankImplications,
+      marketExpectationsVsPricing: parsed.marketExpectationsVsPricing,
+      crossAssetConfirmation: parsed.crossAssetConfirmation,
+      contradictions: parsed.contradictions,
+      risks: parsed.risks,
+      finalAssessment: parsed.finalAssessment,
+      // Deduplicated by source URL so the note carries real, checkable
+      // provenance for every number it was allowed to see.
+      sourcesUsed: Array.from(
+        new Map(input.indicatorFacts.map((f) => [f.source.url, f.source])).values()
+      ),
+      disclaimer:
+        "This is AI-generated commentary describing a deterministic rules-based assessment. It is not financial advice, not a trade signal, and not a guarantee of future outcomes.",
+    };
+  } catch (err) {
+    console.error("Analyst assessment generation failed:", err);
+    return null;
   }
-  return data;
-}
-
-/**
- * Saves the latest AI analyst assessment. We only keep one row (the most
- * recent), so this deletes any existing row first, then inserts fresh -
- * simpler than upsert logic for a single-row table.
- */
-export async function saveAnalystAssessment(
-  assessment: AnalystAssessment,
-  verdict: {
-    overallCondition: string;
-    overallConfidence: string;
-    decisionRule: string;
-  }
-) {
-  await supabaseAdmin.from("analyst_assessments").delete().neq("id", 0);
-
-  const { data, error } = await supabaseAdmin
-    .from("analyst_assessments")
-    .insert({
-      currency: assessment.currency,
-      generated_at: assessment.generatedAt,
-      what_changed: assessment.whatChanged,
-      why_it_changed: assessment.whyItChanged,
-      economic_implications: assessment.economicImplications,
-      central_bank_implications: assessment.centralBankImplications,
-      market_expectations_vs_pricing: assessment.marketExpectationsVsPricing,
-      cross_asset_confirmation: assessment.crossAssetConfirmation,
-      contradictions: assessment.contradictions,
-      risks: assessment.risks,
-      final_assessment: assessment.finalAssessment,
-      disclaimer: assessment.disclaimer,
-      // The orchestrator's condition is the verdict of record. The legacy
-      // fundamental_score/fundamental_bias columns are intentionally left
-      // NULL - writing the quick score here made the research note appear
-      // to be based on a number the engine does not treat as authoritative.
-      overall_condition: verdict.overallCondition,
-      overall_confidence: verdict.overallConfidence,
-      decision_rule: verdict.decisionRule,
-      // Stored as text[] of source names; the full refs live in the
-      // assessment object the note was generated from.
-      sources_used: assessment.sourcesUsed.map((s) => s.name),
-    })
-    .select();
-
-  if (error) {
-    throw new Error(`Failed to save analyst assessment: ${error.message}`);
-  }
-  return data;
-}
-
-/**
- * Gets the latest saved AI analyst assessment, or null if none exists yet.
- */
-export async function getLatestAnalystAssessment() {
-  const { data, error } = await supabase
-    .from("analyst_assessments")
-    .select("*")
-    .order("generated_at", { ascending: false })
-    .limit(1)
-    .maybeSingle();
-
-  if (error) {
-    throw new Error(`Failed to fetch analyst assessment: ${error.message}`);
-  }
-  return data;
 }
