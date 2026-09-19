@@ -5,19 +5,20 @@
  * steps. See vercel.json for the schedule.
  *
  * Protected: only Vercel's own cron scheduler (or someone who knows the
- * CRON_SECRET) can trigger this — otherwise anyone on the internet could
+ * CRON_SECRET) can trigger this - otherwise anyone on the internet could
  * spam our FRED quota by hitting this URL repeatedly.
  */
 
 import { NextRequest, NextResponse } from "next/server";
+import { requireCronSecret } from "@/lib/cron-auth";
 import {
   fetchLatestFromFred,
   ALL_FRED_INDICATORS,
 } from "@/layers/data-acquisition/sources/fred";
 import { normalizeToRow } from "@/layers/data-normalization/normalize";
 import { generateForecast } from "@/layers/forecast-engine/forecast";
-import { computeUsdFundamentalScore } from "@/layers/fundamental-scoring/scoring";
 import { generateAnalystAssessment } from "@/layers/ai-analyst-reasoning/analyst";
+import { buildUsdAssessment } from "@/layers/assessment-pipeline/build-usd-assessment";
 import {
   saveDataPoint,
   getIndicatorHistory,
@@ -34,16 +35,10 @@ export const maxDuration = 60; // Vercel Hobby plan's hard cap
 const MAJOR_RELEASES_TO_FORECAST: IndicatorId[] = ["CPI", "PPI", "NFP", "GDP"];
 
 export async function GET(request: NextRequest) {
-  // Vercel automatically sends this header on cron-triggered requests.
-  const authHeader = request.headers.get("authorization");
-  const isVercelCron = authHeader === `Bearer ${process.env.CRON_SECRET}`;
-
-  // Allow manual browser testing too (no secret configured yet, or running
-  // locally) — but once CRON_SECRET is set in production, only the cron
-  // job (or someone who knows the secret) can trigger this.
-  if (process.env.CRON_SECRET && !isVercelCron) {
-    return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
-  }
+  // Fail-closed: refuses if CRON_SECRET is unset rather than letting the
+  // internet trigger a full sync. Vercel Cron sends the header for us.
+  const denied = requireCronSecret(request);
+  if (denied) return denied;
 
   const results: Array<{
     indicator: string;
@@ -92,50 +87,65 @@ export async function GET(request: NextRequest) {
 
   const successCount = results.filter((r) => r.success).length;
 
-  // Layer 6 + 7: compute the fundamental score, then have the AI analyst
-  // write it up. Runs after every sync so the commentary always reflects
-  // the freshest data.
+  // Layer 6 + 7: run the real assessment engine (six category engines +
+  // orchestrator), then have the AI analyst write it up. Runs after every
+  // sync so the note always reflects the freshest stored data.
+  //
+  // FIXED: this previously ran the legacy quick score and fed THAT to the
+  // analyst, so the written note described a number the engine does not
+  // treat as authoritative and never saw any category evidence.
   let analystStatus = "skipped";
+  let overallCondition: string | null = null;
+
   try {
+    const { assessment: usdAssessment, readErrors } = await buildUsdAssessment();
+    overallCondition = usdAssessment.overallCondition;
+
+    if (readErrors.length > 0) {
+      console.warn("Assessment ran with unreadable histories:", readErrors);
+    }
+
     const allIndicators = Object.keys(INDICATOR_META) as IndicatorId[];
     const latestByIndicator = await getLatestForIndicators(allIndicators);
 
-    const momChangeByIndicator = new Map<IndicatorId, number | null>();
-    const indicatorSummaries = [];
+    const indicatorFacts = [];
     for (const [id, row] of latestByIndicator.entries()) {
-      const momChange =
-        row.actual != null && row.previous != null
-          ? Math.round((row.actual - row.previous) * 1000) / 1000
-          : null;
-      momChangeByIndicator.set(id as IndicatorId, momChange);
-      indicatorSummaries.push({
-        indicator: id,
+      indicatorFacts.push({
+        label: INDICATOR_META[id as IndicatorId]?.label ?? id,
         actual: row.actual,
         previous: row.previous,
-        momChange,
         periodCovered: row.period_covered,
-        sourceUrl: row.source_url,
+        source: {
+          name: row.source_name,
+          url: row.source_url,
+          tier: row.source_tier,
+          retrievedAt: row.retrieved_at,
+        },
       });
     }
 
-    const fundamentalScore = computeUsdFundamentalScore(momChangeByIndicator);
-    const assessment = await generateAnalystAssessment({
-      fundamentalScore,
-      indicatorSummaries,
+    const note = await generateAnalystAssessment({
+      assessment: usdAssessment,
+      indicatorFacts,
     });
 
-    if (assessment) {
-      await saveAnalystAssessment(
-        assessment,
-        fundamentalScore.score,
-        fundamentalScore.overallBias
-      );
+    if (note) {
+      await saveAnalystAssessment(note, {
+        overallCondition: usdAssessment.overallCondition,
+        overallConfidence: usdAssessment.confidence,
+        decisionRule: usdAssessment.rationale,
+      });
       analystStatus = "success";
     } else {
-      analystStatus = "failed (see logs)";
+      // Null is the expected, honest outcome when GEMINI_API_KEY is unset
+      // or the model's output failed validation. The data pipeline above
+      // has already succeeded either way.
+      analystStatus = process.env.GEMINI_API_KEY
+        ? "failed validation (nothing saved - see logs)"
+        : "skipped (GEMINI_API_KEY not set)";
     }
   } catch (err) {
-    console.error("Analyst assessment step failed:", err);
+    console.error("Assessment/analyst step failed:", err);
     analystStatus = "failed (see logs)";
   }
 
@@ -148,6 +158,7 @@ export async function GET(request: NextRequest) {
       results,
     },
     forecasts: forecastResults,
+    overallCondition,
     analyst: analystStatus,
   });
 }
