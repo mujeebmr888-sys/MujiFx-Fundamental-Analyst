@@ -32,9 +32,11 @@ export default async function ResearchPage() {
       <main className="flex-1 p-8 max-w-3xl">
         <h1 className="text-2xl font-semibold mb-2">USD Research Note</h1>
         <p className="text-slate-400 mb-8">
-          AI-generated commentary summarizing everything else on this
-          dashboard, following a fixed analyst framework. Generated
-          automatically once a day — not trading advice.
+          Plain-English write-up of the deterministic assessment produced
+          by the six category engines and the orchestrator. The model
+          describes that verdict - it never reaches one of its own, and
+          never overrides a category label. Generated automatically once a
+          day; not trading advice.
         </p>
 
         {debugError && (
@@ -45,7 +47,7 @@ export default async function ResearchPage() {
 
         {!assessment ? (
           <div className="text-slate-600 text-sm italic">
-            No research note yet — check back after the next automatic sync
+            No research note yet - check back after the next automatic sync
             (runs once daily), or run <code>/api/sync/all</code> manually to
             generate one now.
           </div>
@@ -53,11 +55,17 @@ export default async function ResearchPage() {
           <div className="border border-slate-800 rounded-lg p-6 bg-slate-900/50">
             <div className="flex items-center justify-between mb-6 pb-4 border-b border-slate-800">
               <div>
-                <span className="text-sm text-slate-400">Overall bias: </span>
-                <span className="font-semibold">{assessment.fundamental_bias}</span>
-                <span className="text-sm text-slate-500 ml-2">
-                  (score: {assessment.fundamental_score}/10)
+                <span className="text-sm text-slate-400">
+                  Overall USD fundamental condition:{" "}
                 </span>
+                <span className="font-semibold">
+                  {assessment.overall_condition ?? "unrecorded"}
+                </span>
+                {assessment.overall_confidence && (
+                  <span className="text-sm text-slate-500 ml-2">
+                    (confidence: {assessment.overall_confidence})
+                  </span>
+                )}
               </div>
               <span className="text-xs text-slate-500">
                 {new Date(assessment.generated_at).toLocaleString()}
@@ -85,6 +93,17 @@ export default async function ResearchPage() {
             <Section title="Contradictions" text={assessment.contradictions} />
             <Section title="Risks" text={assessment.risks} />
             <Section title="Final Assessment" text={assessment.final_assessment} />
+
+            {assessment.decision_rule && (
+              <div className="mb-6">
+                <h3 className="text-xs font-semibold text-slate-400 uppercase tracking-wide mb-1.5">
+                  Decision rule the engine applied
+                </h3>
+                <p className="text-slate-400 text-sm leading-relaxed">
+                  {assessment.decision_rule}
+                </p>
+              </div>
+            )}
 
             <p className="text-xs text-slate-600 italic mt-6 pt-4 border-t border-slate-800">
               {assessment.disclaimer}
