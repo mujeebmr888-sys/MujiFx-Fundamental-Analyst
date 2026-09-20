@@ -1,5 +1,5 @@
 /**
- * STEP 13M — AUTHORITATIVE PCE INGESTION
+ * STEP 13M - AUTHORITATIVE PCE INGESTION
  *
  * Server-side ingestion route for official BEA PCE and Core PCE
  * price-change observations from NIPA Table 2.8.7.
@@ -9,7 +9,8 @@
  * re-annualize or infer release dates.
  */
 
-import { NextResponse } from "next/server";
+import { NextResponse, type NextRequest } from "next/server";
+import { requireCronSecret } from "@/lib/cron-auth";
 import {
   BEA_CORE_PCE_LINE_CODE,
   BEA_PCE_LINE_CODE,
@@ -30,7 +31,11 @@ function normalizeBeaMonth(timePeriod: string): string | null {
   return match ? `${match[1]}-${match[2]}` : null;
 }
 
-export async function GET() {
+export async function GET(request: NextRequest) {
+  // This route writes to the database and consumes an upstream API quota.
+  const denied = requireCronSecret(request);
+  if (denied) return denied;
+
   try {
     const result = await fetchBeaPcePilot(undefined, "LAST5");
     const observations: AuthoritativeObservation[] = [];
