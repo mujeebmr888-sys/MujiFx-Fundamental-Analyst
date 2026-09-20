@@ -56,6 +56,18 @@ export const INDICATOR_META: Record<IndicatorId, IndicatorMeta> = {
     unitSuffix: "%",
   },
 
+  // Same-day fact: the FOMC's announced target-range UPPER bound
+  // (FRED series DFEDTARU). Unlike FED_FUNDS_RATE above (a MONTHLY
+  // average that cannot be published until the month ends), this updates
+  // the same business day a rate decision is announced -- which is what a
+  // trader checking the site daily actually needs. See monetary-policy.ts
+  // for how the two are combined without one overriding the other.
+  FED_TARGET_RANGE_UPPER: {
+    label: "FOMC Target Range (Upper Bound)",
+    category: "Federal Reserve",
+    unitSuffix: "%",
+  },
+
   TREASURY_2Y: { label: "2-Year Treasury Yield", category: "Market", unitSuffix: "%" },
   TREASURY_10Y: {
     label: "10-Year Treasury Yield",
