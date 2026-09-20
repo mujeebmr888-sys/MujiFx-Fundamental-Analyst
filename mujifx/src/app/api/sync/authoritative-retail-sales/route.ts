@@ -1,4 +1,5 @@
-import { NextResponse } from "next/server";
+import { NextResponse, type NextRequest } from "next/server";
+import { requireCronSecret } from "@/lib/cron-auth";
 import {
   CENSUS_MRTS_SERIES_ID,
   fetchCensusRetailSales,
@@ -8,7 +9,11 @@ import type { AuthoritativeObservation } from "@/layers/data-acquisition/authori
 
 export const dynamic = "force-dynamic";
 
-export async function GET() {
+export async function GET(request: NextRequest) {
+  // This route writes to the database and consumes an upstream API quota.
+  const denied = requireCronSecret(request);
+  if (denied) return denied;
+
   const endYear = new Date().getUTCFullYear();
   const startYear = endYear - 1;
 
