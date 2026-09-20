@@ -28,6 +28,7 @@ export type IndicatorId =
   | "ISM_MANUFACTURING"
   | "ISM_SERVICES"
   | "FED_FUNDS_RATE"
+  | "FED_TARGET_RANGE_UPPER"
   | "TREASURY_2Y"
   | "TREASURY_10Y"
   | "BROAD_DOLLAR_INDEX"
@@ -134,7 +135,7 @@ export interface FundamentalScore {
 
 /**
  * Output of the AI analyst reasoning layer.
- * This is research commentary — it must never contain trade instructions.
+ * This is research commentary - it must never contain trade instructions.
  */
 export interface AnalystAssessment {
   currency: "USD";
