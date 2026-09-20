@@ -93,7 +93,7 @@ export default async function DashboardPage() {
                 href="/usd"
                 className="text-xs text-slate-500 hover:text-slate-300 underline decoration-dotted"
               >
-                full reasoning chain ->
+                {"full reasoning chain ->"}
               </Link>
             </div>
 
