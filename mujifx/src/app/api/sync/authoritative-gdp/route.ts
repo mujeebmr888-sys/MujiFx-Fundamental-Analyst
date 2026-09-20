@@ -1,12 +1,13 @@
 /**
- * STEP 13M — AUTHORITATIVE GDP INGESTION
+ * STEP 13M - AUTHORITATIVE GDP INGESTION
  *
  * Server-side ingestion route for official BEA real GDP growth from
  * NIPA Table 1.1.1. The BEA-published quarterly annualized growth rate is
  * stored as-is; MUJIFX does not re-annualize it.
  */
 
-import { NextResponse } from "next/server";
+import { NextResponse, type NextRequest } from "next/server";
+import { requireCronSecret } from "@/lib/cron-auth";
 import {
   BEA_GDP_GROWTH_LINE_CODE,
   fetchBeaGdpGrowthPilot,
@@ -24,7 +25,11 @@ function normalizeBeaQuarter(timePeriod: string): string | null {
   return `${match[1]}-${monthByQuarter[match[2] as keyof typeof monthByQuarter]}`;
 }
 
-export async function GET() {
+export async function GET(request: NextRequest) {
+  // This route writes to the database and consumes an upstream API quota.
+  const denied = requireCronSecret(request);
+  if (denied) return denied;
+
   try {
     const result = await fetchBeaGdpGrowthPilot(undefined, "LAST5");
 
