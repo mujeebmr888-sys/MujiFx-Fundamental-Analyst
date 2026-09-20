@@ -1,5 +1,5 @@
 /**
- * STEP 13L — AUTHORITATIVE EMPLOYMENT INGESTION
+ * STEP 13L - AUTHORITATIVE EMPLOYMENT INGESTION
  *
  * Server-side verification route for the authoritative BLS Employment
  * indicators and the shared authoritative writer.
@@ -8,7 +8,8 @@
  * Release dates are not fabricated from observation periods.
  */
 
-import { NextResponse } from "next/server";
+import { NextResponse, type NextRequest } from "next/server";
+import { requireCronSecret } from "@/lib/cron-auth";
 import {
   BLS_EMPLOYMENT_SERIES,
   blsEmploymentPeriodToMonth,
@@ -31,7 +32,11 @@ const UNIT_BY_SERIES = {
   [BLS_EMPLOYMENT_SERIES.AVG_HOURLY_EARNINGS]: "Dollars per hour",
 } as const;
 
-export async function GET() {
+export async function GET(request: NextRequest) {
+  // This route writes to the database and consumes an upstream API quota.
+  const denied = requireCronSecret(request);
+  if (denied) return denied;
+
   try {
     const endYear = new Date().getUTCFullYear();
     const startYear = endYear - 1;
