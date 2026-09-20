@@ -1,11 +1,16 @@
-import { NextResponse } from "next/server";
+import { NextResponse, type NextRequest } from "next/server";
+import { requireCronSecret } from "@/lib/cron-auth";
 import { FED_G17_IP_SERIES_ID, fetchFedG17IndustrialProduction } from "@/layers/data-acquisition/sources/fed-g17-ip";
 import { writeAuthoritativeBatch } from "@/layers/data-acquisition/authoritative-writer";
 import type { AuthoritativeObservation } from "@/layers/data-acquisition/authoritative-writer";
 
 export const dynamic = "force-dynamic";
 
-export async function GET() {
+export async function GET(request: NextRequest) {
+  // This route writes to the database and consumes an upstream API quota.
+  const denied = requireCronSecret(request);
+  if (denied) return denied;
+
   try {
     const endYear = new Date().getUTCFullYear();
     const startYear = endYear - 1;
