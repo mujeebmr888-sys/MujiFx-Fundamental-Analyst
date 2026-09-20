@@ -1,7 +1,7 @@
 /**
  * GET /api/sync/backfill
  *
- * ONE-TIME / ON-DEMAND historical backfill — separate from the daily
+ * ONE-TIME / ON-DEMAND historical backfill - separate from the daily
  * /api/sync/all cron, which is completely unmodified and unaffected by
  * this route. Fetches deeper FRED history (per-indicator depth justified
  * in INDICATOR_BACKFILL_DEPTH, fred.ts) and saves each observation via
@@ -9,15 +9,16 @@
  *
  * Idempotent: relies entirely on the existing
  * `unique(indicator, period_covered)` constraint + saveDataPoint's
- * existing upsert — rerunning this route just updates the same rows,
+ * existing upsert - rerunning this route just updates the same rows,
  * never creates duplicates.
  *
- * Protected the same way as /api/sync/all — only Vercel's cron scheduler
+ * Protected the same way as /api/sync/all - only Vercel's cron scheduler
  * (or someone who knows CRON_SECRET) can trigger it, since it makes many
  * FRED API calls.
  */
 
 import { NextRequest, NextResponse } from "next/server";
+import { requireCronSecret } from "@/lib/cron-auth";
 import {
   fetchHistoryFromFred,
   INDICATOR_BACKFILL_DEPTH,
@@ -30,12 +31,8 @@ export const dynamic = "force-dynamic";
 export const maxDuration = 60;
 
 export async function GET(request: NextRequest) {
-  const authHeader = request.headers.get("authorization");
-  const isVercelCron = authHeader === `Bearer ${process.env.CRON_SECRET}`;
-
-  if (process.env.CRON_SECRET && !isVercelCron) {
-    return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
-  }
+  const denied = requireCronSecret(request);
+  if (denied) return denied;
 
   const results: Array<{
     indicator: string;
