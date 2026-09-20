@@ -1,19 +1,26 @@
 /**
  * Manual trigger for the full pipeline, for ONE indicator (CPI), to prove
  * the whole chain works end-to-end:
- *   FRED (layer 1) → normalize (layer 2) → Supabase (layer 3)
+ *   FRED (layer 1) -> normalize (layer 2) -> Supabase (layer 3)
  *
  * Visit /api/sync/cpi in the browser (or call it) to run it.
  * Later this will be replaced by a scheduled job, but a manual route is the
  * simplest way to verify each layer actually works before automating it.
  */
 
-import { NextResponse } from "next/server";
+import { NextResponse, type NextRequest } from "next/server";
+import { requireCronSecret } from "@/lib/cron-auth";
+
+export const dynamic = "force-dynamic";
 import { fetchLatestFromFred } from "@/layers/data-acquisition/sources/fred";
 import { normalizeToRow } from "@/layers/data-normalization/normalize";
 import { saveDataPoint } from "@/layers/historical-database/database";
 
-export async function GET() {
+export async function GET(request: NextRequest) {
+  // This route writes to the database and consumes an upstream API quota.
+  const denied = requireCronSecret(request);
+  if (denied) return denied;
+
   const point = await fetchLatestFromFred("CPI");
 
   if (!point.available) {
@@ -38,7 +45,7 @@ export async function GET() {
     });
   } catch (err) {
     // Log the full error server-side only (visible in Vercel's function logs,
-    // never in the response the browser receives) — the response itself
+    // never in the response the browser receives) - the response itself
     // must never echo raw error text, since it could contain sensitive
     // details like a malformed API key.
     console.error("CPI sync failed:", err);
