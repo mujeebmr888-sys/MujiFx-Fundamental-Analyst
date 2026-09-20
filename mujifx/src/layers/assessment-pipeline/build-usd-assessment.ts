@@ -10,15 +10,15 @@
  * fetch depths. Both routes and pages now call this, so the depths can
  * never drift apart.
  *
- * REQUIRED HISTORY DEPTHS — these are not arbitrary. Each is the minimum
+ * REQUIRED HISTORY DEPTHS - these are not arbitrary. Each is the minimum
  * the corresponding engine's own calculations need; shortening one silently
  * downgrades that category's confidence to "Insufficient data".
- *   13 months  → 12 month-over-month changes / a YoY comparison
- *   15 months  → the Sahm Rule (current 3-mo avg vs the min of the
+ *   13 months  -> 12 month-over-month changes / a YoY comparison
+ *   15 months  -> the Sahm Rule (current 3-mo avg vs the min of the
  *                previous twelve 3-mo averages)
- *    8 weeks   → 4-week moving averages of jobless claims, plus a prior
+ *    8 weeks   -> 4-week moving averages of jobless claims, plus a prior
  *                4-week window to compare against
- *    8 quarters→ two years of GDP prints
+ *    8 quarters-> two years of GDP prints
  */
 
 import { getIndicatorHistory } from "@/layers/historical-database/database";
@@ -49,6 +49,9 @@ export const ASSESSMENT_HISTORY_DEPTH: Record<string, number> = {
   RETAIL_SALES: 13,
   INDUSTRIAL_PRODUCTION: 13,
   FED_FUNDS_RATE: 4,
+  // Small depth is enough -- this only needs to detect "did the most
+  // recent value change from the one before it", not a trend.
+  FED_TARGET_RANGE_UPPER: 5,
   TREASURY_2Y: 10,
   TREASURY_10Y: 10,
   BROAD_DOLLAR_INDEX: 4,
@@ -63,7 +66,7 @@ type HistoryMap = Record<string, any[]>;
  * Reads every required history in parallel.
  *
  * A single indicator failing to read must not take down the whole
- * assessment — the engines are all built to degrade honestly to
+ * assessment - the engines are all built to degrade honestly to
  * "Insufficient data" when an input is empty, and that is a far more
  * useful outcome than a 500. Failed reads are returned in `readErrors` so
  * the page can surface them instead of hiding a silent empty array.
@@ -90,7 +93,7 @@ async function loadHistories(): Promise<{ histories: HistoryMap; readErrors: str
 
 export interface UsdAssessmentResult {
   assessment: UsdFundamentalAssessment;
-  /** Indicators whose database read failed — empty on a healthy run. */
+  /** Indicators whose database read failed - empty on a healthy run. */
   readErrors: string[];
 }
 
@@ -127,6 +130,7 @@ export async function buildUsdAssessment(): Promise<UsdAssessmentResult> {
 
   const monetaryPolicy = generateMonetaryPolicyAssessment({
     fedFundsRate: h.FED_FUNDS_RATE,
+    fedTargetRangeUpper: h.FED_TARGET_RANGE_UPPER,
     inflationAssessment: inflation.assessment,
     employmentAssessment: employment.assessment,
     growthAssessment: growth.assessment,
