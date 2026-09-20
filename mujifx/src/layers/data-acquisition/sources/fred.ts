@@ -1,7 +1,7 @@
 /**
  * LAYER 1: DATA ACQUISITION
  * Talks to the real FRED API. Does not interpret or score anything.
- * If the request fails or data is missing, returns available:false —
+ * If the request fails or data is missing, returns available:false -
  * never fabricates a number.
  */
 
@@ -23,16 +23,20 @@ const FRED_SERIES_MAP: Partial<Record<IndicatorId, string>> = {
   INITIAL_JOBLESS_CLAIMS: "ICSA",
   CONTINUING_CLAIMS: "CCSA",
   JOLTS: "JTSJOL",
-  SAHM_RULE: "SAHMREALTIME", // FRED's own pre-calculated Sahm Rule — never recomputed in our code
+  SAHM_RULE: "SAHMREALTIME", // FRED's own pre-calculated Sahm Rule - never recomputed in our code
   GDP: "GDP",
-  GDP_GROWTH_RATE: "A191RL1Q225SBEA", // BEA's own pre-computed Real GDP % change, SAAR — used as-is, never re-annualized
+  GDP_GROWTH_RATE: "A191RL1Q225SBEA", // BEA's own pre-computed Real GDP % change, SAAR - used as-is, never re-annualized
   RETAIL_SALES: "RSAFS",
   INDUSTRIAL_PRODUCTION: "INDPRO",
   FED_FUNDS_RATE: "FEDFUNDS",
+  // Daily series, updates same business day as an FOMC decision -- unlike
+  // FEDFUNDS above which is a monthly average and lags a full month.
+  // See monetary-policy.ts for how the two are combined.
+  FED_TARGET_RANGE_UPPER: "DFEDTARU",
   TREASURY_2Y: "DGS2",
   TREASURY_10Y: "DGS10",
   BROAD_DOLLAR_INDEX: "DTWEXBGS",
-  VIX: "VIXCLS", // CBOE VIX distributed through FRED — stored as retrieved, no additional calculation
+  VIX: "VIXCLS", // CBOE VIX distributed through FRED - stored as retrieved, no additional calculation
 };
 
 // Exported so the sync-all route can loop over every mapped indicator
@@ -130,7 +134,7 @@ export async function fetchLatestFromFred(
 }
 
 /**
- * ONE-TIME BACKFILL DEPTH PER INDICATOR — used only by the new backfill
+ * ONE-TIME BACKFILL DEPTH PER INDICATOR - used only by the new backfill
  * route, never by fetchLatestFromFred/ALL_FRED_INDICATORS/the daily
  * /api/sync/all cron, which continue completely unchanged.
  *
@@ -147,11 +151,11 @@ export async function fetchLatestFromFred(
  *     (YoY / 12-release calculations read index 12)
  *   INITIAL_JOBLESS_CLAIMS: 8 (4-week avg vs prior 4-week avg, index 7)
  *   CONTINUING_CLAIMS/JOLTS: 4 (3-release trend, index 3)
- *   SAHM_RULE: 1 — the engine minimum. Employment.ts only ever reads
+ *   SAHM_RULE: 1 - the engine minimum. Employment.ts only ever reads
  *     `sahmReal[0]`; no historical trend is computed for Sahm there.
  *   GDP_GROWTH_RATE: engine minimum is 2 (growth.ts's confidence logic
  *     checks `.length < 2` before allowing above "Low"). 8 is used here
- *     as an IMPLEMENTATION BUFFER (not a stricter engine requirement) —
+ *     as an IMPLEMENTATION BUFFER (not a stricter engine requirement) -
  *     roughly 2 years of quarterly data, matching the same buffer already
  *     used by /api/assessment/usd's read-side depth, so backfill and read
  *     stay consistent with each other.
@@ -173,7 +177,7 @@ export const INDICATOR_BACKFILL_DEPTH: Partial<Record<IndicatorId, number>> = {
   CONTINUING_CLAIMS: 4,
   JOLTS: 4,
   SAHM_RULE: 1,
-  GDP_GROWTH_RATE: 8, // engine minimum is 2 — see comment above
+  GDP_GROWTH_RATE: 8, // engine minimum is 2 - see comment above
   RETAIL_SALES: 13,
   INDUSTRIAL_PRODUCTION: 13,
   FED_FUNDS_RATE: 4,
@@ -184,14 +188,14 @@ export const INDICATOR_BACKFILL_DEPTH: Partial<Record<IndicatorId, number>> = {
 };
 
 /**
- * LAYER 1 (bulk/backfill variant) — fetches `targetValidDepth` historical
+ * LAYER 1 (bulk/backfill variant) - fetches `targetValidDepth` historical
  * observations for ONE indicator. Used only by the new one-time backfill
  * route. Does NOT modify or replace fetchLatestFromFred above, which the
  * daily /api/sync/all cron continues to use completely unchanged
  * (limit=2, single latest point).
  *
  * `targetValidDepth` means the number of VALID (non-missing) observations
- * to return — NOT simply how many raw FRED observations to request. FRED
+ * to return - NOT simply how many raw FRED observations to request. FRED
  * occasionally marks individual observations as missing ("."), which
  * would otherwise silently reduce the valid count below what each
  * assessment engine actually needs even though enough real data exists
@@ -199,7 +203,7 @@ export const INDICATOR_BACKFILL_DEPTH: Partial<Record<IndicatorId, number>> = {
  *
  * CHRONOLOGICAL "previous" MAPPING: each returned point's `previous` is
  * the FRED observation immediately OLDER than it in the SAME fetched
- * batch — the identical adjacency rule fetchLatestFromFred already uses
+ * batch - the identical adjacency rule fetchLatestFromFred already uses
  * for its single latest/prior pair (observations[0] vs observations[1]),
  * just applied at every index instead of only the newest one. This is
  * why one extra observation beyond `targetValidDepth` is always reserved:
@@ -209,19 +213,19 @@ export const INDICATOR_BACKFILL_DEPTH: Partial<Record<IndicatorId, number>> = {
  *
  * HANDLING MISSING OBSERVATIONS (the fix): if walking the fetched batch
  * turns up fewer than `targetValidDepth` valid points because some were
- * marked missing, we re-request FRED with a LARGER limit — increased by
+ * marked missing, we re-request FRED with a LARGER limit - increased by
  * EXACTLY the observed shortfall (how many were missing + how many valid
  * points we're still short), never by an arbitrary blind constant. This
  * is retried up to MAX_ATTEMPTS times as a safety bound, and stops early
  * (without retrying further) the moment FRED returns fewer observations
- * than requested — that means the series' real history has been
+ * than requested - that means the series' real history has been
  * exhausted, and we honestly return however many valid points exist
  * rather than fabricating or interpolating more.
  *
  * DATA INTEGRITY: observations FRED marks as missing (".") are skipped
- * entirely — never inserted, never interpolated, never fabricated. If a
+ * entirely - never inserted, never interpolated, never fabricated. If a
  * point's own "previous" observation happens to be missing, that point's
- * `previous` is `null` — matching fetchLatestFromFred's existing
+ * `previous` is `null` - matching fetchLatestFromFred's existing
  * behavior exactly, not a new rule.
  */
 export async function fetchHistoryFromFred(
@@ -232,7 +236,7 @@ export async function fetchHistoryFromFred(
   const apiKey = process.env.FRED_API_KEY;
   if (!seriesId || !apiKey) return [];
 
-  const MAX_ATTEMPTS = 4; // safety bound against unbounded retries — not an arbitrary depth increase
+  const MAX_ATTEMPTS = 4; // safety bound against unbounded retries - not an arbitrary depth increase
   let requestLimit = targetValidDepth + 1;
   let observations: Array<{ date: string; value: string }> = [];
 
@@ -249,7 +253,7 @@ export async function fetchHistoryFromFred(
 
     // Walk the batch, reserving the LAST fetched observation purely as a
     // "previous" source for the oldest point we'd keep (same reservation
-    // fetchLatestFromFred's +1 always intended) — not counted as a point
+    // fetchLatestFromFred's +1 always intended) - not counted as a point
     // itself.
     let validCount = 0;
     let missingCount = 0;
@@ -259,10 +263,10 @@ export async function fetchHistoryFromFred(
       if (validCount >= targetValidDepth) break;
     }
 
-    if (validCount >= targetValidDepth) break; // enough valid observations found — stop retrying
+    if (validCount >= targetValidDepth) break; // enough valid observations found - stop retrying
 
     const gotFewerThanRequested = observations.length < requestLimit;
-    if (gotFewerThanRequested) break; // FRED has no more real history for this series — stop, never fabricate
+    if (gotFewerThanRequested) break; // FRED has no more real history for this series - stop, never fabricate
 
     // Escalate by exactly the observed shortfall (missing + still-needed), not a blind constant.
     const deficit = targetValidDepth - validCount;
@@ -272,7 +276,7 @@ export async function fetchHistoryFromFred(
   const points: EconomicDataPoint[] = [];
   for (let i = 0; i < observations.length - 1 && points.length < targetValidDepth; i++) {
     const obs = observations[i];
-    if (obs.value === ".") continue; // FRED-marked missing — skip, never fabricate
+    if (obs.value === ".") continue; // FRED-marked missing - skip, never fabricate
 
     const priorObs = observations[i + 1];
     const previous =
