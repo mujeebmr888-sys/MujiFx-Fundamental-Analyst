@@ -1,12 +1,13 @@
 /**
- * STEP 13M — AUTHORITATIVE FED FUNDS INGESTION
+ * STEP 13M - AUTHORITATIVE FED FUNDS INGESTION
  *
  * Server-side ingestion route for the Federal Reserve Board H.15 monthly
  * effective federal funds rate. This is the effective rate, not the FOMC
  * target range.
  */
 
-import { NextResponse } from "next/server";
+import { NextResponse, type NextRequest } from "next/server";
+import { requireCronSecret } from "@/lib/cron-auth";
 import {
   FED_FUNDS_H15_SERIES_ID,
   fetchFedFundsPilot,
@@ -16,7 +17,11 @@ import type { AuthoritativeObservation } from "@/layers/data-acquisition/authori
 
 export const dynamic = "force-dynamic";
 
-export async function GET() {
+export async function GET(request: NextRequest) {
+  // This route writes to the database and consumes an upstream API quota.
+  const denied = requireCronSecret(request);
+  if (denied) return denied;
+
   try {
     const result = await fetchFedFundsPilot();
 
