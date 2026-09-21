@@ -132,6 +132,14 @@ export function generateMonetaryPolicyAssessment(
     (r) => r.actual !== null
   );
 
+  // targetRangeOverride, when set, is a REAL, VERIFIED FOMC decision that is
+  // more current than the monthly effective-rate history below has caught
+  // up to. It is used to drive rateTrend directly further down -- a rate
+  // hike is a hawkish act in itself; this engine does not sit on that fact
+  // for weeks waiting for a monthly average to catch up. This does not
+  // touch the Step 4 combination table's logic, only which reading feeds it.
+  let targetRangeOverride: { direction: "rising" | "falling"; change: number } | null = null;
+
   if (targetRangeHistory.length > 0) {
     const latestTarget = targetRangeHistory[0];
     facts.push({
@@ -156,21 +164,25 @@ export function generateMonetaryPolicyAssessment(
         `FOMC Target Range (Upper Bound) is currently ${latestTarget.actual}%, ${
           change > 0 ? "up" : change < 0 ? "down" : "unchanged"
         } ${Math.abs(change)}pp from its last different level as of ${latestTarget.period_covered} -- ` +
-          `this reflects the FOMC's own announced decision same-day, ahead of the monthly effective-rate trend above which can lag by several weeks.`
+          `this is the FOMC's own announced decision, same-day, ahead of the monthly effective-rate trend below which can lag by several weeks.`
       );
     }
 
     // If the target range moved more recently than the monthly effective
-    // rate's own last update, say so explicitly rather than let the two
-    // silently disagree with no explanation on the page.
+    // rate's own last update, that move IS the authoritative rate-direction
+    // signal from here on -- a completed FOMC decision, not a projection.
     const fedFundsLatestPeriod = real[0]?.period_covered;
     if (
       fedFundsLatestPeriod &&
       latestTarget.period_covered > fedFundsLatestPeriod &&
       priorDistinct
     ) {
+      const change = round((latestTarget.actual as number) - (priorDistinct.actual as number));
+      if (change !== 0) {
+        targetRangeOverride = { direction: change > 0 ? "rising" : "falling", change };
+      }
       conflictingEvidence.push(
-        `A more recent FOMC decision exists (target range moved to ${latestTarget.actual}% as of ${latestTarget.period_covered}) than the monthly effective-rate trend above has caught up to (latest monthly data: ${fedFundsLatestPeriod}). The Hawkish/Dovish assessment below is still based on the monthly trend, per the approved methodology -- this note exists so that gap is never hidden.`
+        `A more recent FOMC decision exists (target range moved to ${latestTarget.actual}% as of ${latestTarget.period_covered}) than the monthly effective-rate trend below has caught up to (latest monthly data: ${fedFundsLatestPeriod}). This engine treats the target-range move as the current rate direction rather than waiting for the monthly average -- this note exists so that gap is never hidden.`
       );
     }
   } else {
@@ -213,11 +225,21 @@ export function generateMonetaryPolicyAssessment(
   }
 
   let rateTrend: "rising" | "falling" | "flat" | "insufficient" = "insufficient";
-  if (changeOverN !== null) {
+
+  if (targetRangeOverride) {
+    // A verified, more-current FOMC decision exists. Use it directly rather
+    // than the monthly average, which has not caught up yet.
+    rateTrend = targetRangeOverride.direction;
+    interpretations.push({
+      label: "Rate-only directional read",
+      rule: "Driven by the FOMC's own announced target-range move when it is more current than the monthly effective-rate history (see Conflicting Evidence above for the gap this covers). Falls back to the monthly effective-rate trend when no more-current target-range move exists. This is NOT the Fed's stance -- it is the direction of the policy rate only.",
+      result: `Rate trend: ${rateTrend} (from the FOMC's own ${targetRangeOverride.change > 0 ? "hike" : "cut"} of ${Math.abs(targetRangeOverride.change)}pp, same-day)`,
+    });
+  } else if (changeOverN !== null) {
     rateTrend = changeOverN > 0 ? "rising" : changeOverN < 0 ? "falling" : "flat";
     interpretations.push({
       label: "Rate-only directional read",
-      rule: "Mechanical reading of the policy rate's own recent change only: rising if positive, falling if negative, flat if unchanged. This is NOT the Fed's stance.",
+      rule: "Mechanical reading of the monthly effective-rate history's own recent change: rising if positive, falling if negative, flat if unchanged. This is NOT the Fed's stance.",
       result: `Rate trend: ${rateTrend}`,
     });
   } else {
@@ -268,6 +290,14 @@ export function generateMonetaryPolicyAssessment(
     conflictingEvidence.push(
       `Policy-data divergence: the Fed Funds Rate is falling, but the underlying economic data implies Hawkish pressure (Inflation=${inflationAssessment}, Employment=${employmentAssessment}, Growth=${growthAssessment}).`
     );
+  } else if (rateTrend === "rising" && dataImpliedPressure === "Neutral/Mixed") {
+    assessment = "Hawkish";
+    assessmentReason =
+      "Rate trend rising and the underlying economic data does not actively contradict it (Neutral/Mixed, not Dovish) - a completed rate hike is itself a hawkish act and is treated as the primary signal rather than waiting for Inflation/Employment/Growth to independently read Strong.";
+  } else if (rateTrend === "falling" && dataImpliedPressure === "Neutral/Mixed") {
+    assessment = "Dovish";
+    assessmentReason =
+      "Rate trend falling and the underlying economic data does not actively contradict it (Neutral/Mixed, not Hawkish) - a completed rate cut is itself a dovish act and is treated as the primary signal rather than waiting for Inflation/Employment/Growth to independently read Weak.";
   } else if (rateTrend === "flat" && dataImpliedPressure !== "Neutral/Mixed") {
     assessment = "Neutral";
     assessmentReason = `Rate trend flat while data-implied pressure is ${dataImpliedPressure}. The approved methodology does not define a separate policy-rate level threshold for establishing a flat-but-elevated or flat-but-easing stance, so the engine does not invent one.`;
@@ -281,7 +311,7 @@ export function generateMonetaryPolicyAssessment(
 
   interpretations.push({
     label: "Broader policy assessment (Step 4)",
-    rule: "Combines the rate-only directional read with data-implied policy pressure. Rising+Hawkish -> Hawkish; falling+Dovish -> Dovish; rising+Dovish or falling+Hawkish -> Neutral with explicit divergence. A flat rate is not assigned Hawkish/Dovish without an approved rate-level threshold; Neutral/Mixed pressure remains Neutral.",
+    rule: "Combines the rate-only directional read with data-implied policy pressure. Rising+Hawkish -> Hawkish (agree). Falling+Dovish -> Dovish (agree). Rising+Neutral/Mixed -> Hawkish (the rate move is the primary signal when data does not contradict it). Falling+Neutral/Mixed -> Dovish (same logic, cut side). Rising+Dovish or falling+Hawkish -> Neutral with explicit divergence flagged (genuine conflict between the rate move and the data). A flat rate is not assigned Hawkish/Dovish without an approved rate-level threshold.",
     result: `${assessment} - ${assessmentReason}`,
   });
 
