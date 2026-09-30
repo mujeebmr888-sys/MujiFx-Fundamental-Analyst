@@ -28,10 +28,6 @@ export default async function DashboardPage() {
     debugError = err instanceof Error ? err.message : String(err);
   }
 
-  // buildUsdAssessment() is the sole USD fundamental assessment path used
-  // by this page. The legacy quick-score card (computeUsdFundamentalScore /
-  // FundamentalBiasCard) has been removed from production per Audit #2B --
-  // scoring.ts itself is intentionally left in place, not yet deleted.
   let engine: Awaited<ReturnType<typeof buildUsdAssessment>> | null = null;
   let engineError: string | null = null;
   try {
