@@ -53,7 +53,7 @@ export async function fetchLatestFromFred(
 
   const baseReturn = {
     indicator,
-    releaseDate: new Date().toISOString(),
+    releaseDate: null,
     periodCovered: "",
     previous: null,
     consensusForecast: null, // FRED does not provide consensus forecasts
@@ -114,7 +114,13 @@ export async function fetchLatestFromFred(
     return {
       ...baseReturn,
       periodCovered: latest.date,
-      releaseDate: latest.date,
+      // realtime_start is FRED's own vintage-tracking date (the first date
+      // this value was recorded as current in FRED's archive). It is NOT a
+      // verified official BLS/BEA/Fed press-release date -- that level of
+      // certification only exists on the authoritative-* ingestion paths.
+      // It is still materially more accurate than reusing the observation
+      // date (periodCovered above), which this field must never equal.
+      releaseDate: latest.realtime_start ?? null,
       actual: latest.value === "." ? null : parseFloat(latest.value),
       previous: prior && prior.value !== "." ? parseFloat(prior.value) : null,
       unit: "as published by FRED (see series notes)",
@@ -185,6 +191,11 @@ export const INDICATOR_BACKFILL_DEPTH: Partial<Record<IndicatorId, number>> = {
   TREASURY_10Y: 10,
   BROAD_DOLLAR_INDEX: 4,
   VIX: 4,
+  // FOMC target range changes only ~8x/year but publishes DAILY (mostly
+  // repeating the same value). 90 days safely spans at least one prior
+  // decision so the monetary-policy engine can always find a distinct
+  // "before" value to detect a hike/cut against.
+  FED_TARGET_RANGE_UPPER: 90,
 };
 
 /**
@@ -238,7 +249,7 @@ export async function fetchHistoryFromFred(
 
   const MAX_ATTEMPTS = 4; // safety bound against unbounded retries - not an arbitrary depth increase
   let requestLimit = targetValidDepth + 1;
-  let observations: Array<{ date: string; value: string }> = [];
+  let observations: Array<{ date: string; value: string; realtime_start?: string }> = [];
 
   for (let attempt = 0; attempt < MAX_ATTEMPTS; attempt++) {
     try {
@@ -284,7 +295,9 @@ export async function fetchHistoryFromFred(
 
     points.push({
       indicator,
-      releaseDate: obs.date,
+      // See the realtime_start comment in fetchLatestFromFred() above --
+      // same caveat applies here.
+      releaseDate: obs.realtime_start ?? null,
       periodCovered: obs.date,
       previous,
       consensusForecast: null,
